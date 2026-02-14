@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { SPRITE_WIDTH, SPRITE_HEIGHT } from '../constants';
+import { SPRITE_WIDTH, SPRITE_HEIGHT, CHECKER_LIGHT, CHECKER_DARK } from '../constants';
+import { isMagentaLikeHex } from '../services/imageProcessingService';
 
 interface AnimationPreviewProps {
     frames: number[][]; // Array of pixel arrays
@@ -39,17 +40,17 @@ const AnimationPreview: React.FC<AnimationPreviewProps> = ({
         // Draw Checkerboard
         for (let y = 0; y < SPRITE_HEIGHT; y++) {
             for (let x = 0; x < SPRITE_WIDTH; x++) {
-                if ((x + y) % 2 === 0) ctx.fillStyle = '#2d3748';
-                else ctx.fillStyle = '#1a202c';
+                if ((x + y) % 2 === 0) ctx.fillStyle = CHECKER_LIGHT;
+                else ctx.fillStyle = CHECKER_DARK;
                 ctx.fillRect(x * scale, y * scale, scale, scale);
             }
         }
 
-        // Draw Pixels
+        // Draw Pixels (never draw magenta — transparent only)
         for (let i = 0; i < currentPixels.length; i++) {
             const colorIdx = currentPixels[i];
             const color = palette[colorIdx];
-            if (color) {
+            if (color && !isMagentaLikeHex(color)) {
                 const x = i % SPRITE_WIDTH;
                 const y = Math.floor(i / SPRITE_WIDTH);
                 ctx.fillStyle = color;
@@ -59,13 +60,18 @@ const AnimationPreview: React.FC<AnimationPreviewProps> = ({
 
     }, [frameIndex, frames, palette, scale]);
 
+    const w = SPRITE_WIDTH * scale;
+    const h = SPRITE_HEIGHT * scale;
+
     return (
-        <div className="flex flex-col items-center gap-2">
-            <div className="relative border border-gray-700 rounded-lg overflow-hidden shadow-lg bg-black">
-                <canvas 
-                    ref={canvasRef} 
-                    width={SPRITE_WIDTH * scale} 
-                    height={SPRITE_HEIGHT * scale} 
+        <div className="flex flex-col items-center gap-2 game-snap">
+            <div className="relative border-2 border-amber-900/50 overflow-hidden sprite-shadow bg-black pixelated">
+                <canvas
+                    ref={canvasRef}
+                    width={w}
+                    height={h}
+                    className="pixelated game-snap"
+                    style={{ width: w, height: h }}
                 />
                 <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-black/50 text-[10px] text-gray-400 rounded backdrop-blur">
                     frame {frameIndex + 1}/{frames.length}

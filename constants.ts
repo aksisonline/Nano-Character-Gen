@@ -1,14 +1,35 @@
-
+/** Final sprite dimensions (pixel-perfect game asset). */
 export const SPRITE_WIDTH = 32;
 export const SPRITE_HEIGHT = 48;
-/** Scale used when asking the model for a higher-res image; we then downsample to SPRITE_WIDTH x SPRITE_HEIGHT with no smoothing to get crisp pixels. */
-export const GENERATION_SCALE = 16;
-export const GEN_WIDTH = SPRITE_WIDTH * GENERATION_SCALE; // 512
-export const GEN_HEIGHT = SPRITE_HEIGHT * GENERATION_SCALE; // 768
+
+/** Generation pipeline: AI outputs at 8× resolution, then we downscale with nearest-neighbor. */
+export const GENERATION_SCALE_8X = 8;
+export const GEN_WIDTH_256 = SPRITE_WIDTH * GENERATION_SCALE_8X; // 256
+export const GEN_HEIGHT_384 = SPRITE_HEIGHT * GENERATION_SCALE_8X; // 384
+
+/** Legacy names for compatibility. */
+export const GENERATION_SCALE = GENERATION_SCALE_8X;
+export const GEN_WIDTH = GEN_WIDTH_256;
+export const GEN_HEIGHT = GEN_HEIGHT_384;
+
+/** Max palette size for quantize step. */
+export const MAX_PALETTE_COLORS = 24;
+
+/** Allowed preview scales (integer only — no CSS scaling). */
+export const PREVIEW_SCALES = [4, 6, 8, 12] as const;
+export const DEFAULT_PREVIEW_SCALE = 8;
+
+/** UI grid (all spacing snaps to multiples). */
+export const GRID_UNIT = 8;
+
+/** Checkerboard background for transparency. */
+export const CHECKER_LIGHT = '#2d3748';
+export const CHECKER_DARK = '#1a202c';
 
 export const TILE_SIZE = 32;
-export const WORLD_WIDTH = 200;
-export const WORLD_HEIGHT = 500;
+/** World map size: small layout so auto-gen uses tiles meaningfully. */
+export const WORLD_WIDTH = 52;
+export const WORLD_HEIGHT = 40;
 
 /**
  * Character gen strategy: AI (e.g. Gemini) cannot reliably output exact 32x48 pixel art.

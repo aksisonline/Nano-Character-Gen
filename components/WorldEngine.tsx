@@ -1,10 +1,13 @@
-
 import React, { useState, useRef, useEffect } from 'react';
-import { WorldData, WorldTile } from '../types';
+import { WorldTile } from '../types';
 import { generateTileset } from '../services/geminiService';
-import { processTileset } from '../services/imageProcessingService';
-import { TILE_SIZE, WORLD_WIDTH, WORLD_HEIGHT } from '../constants';
-import { Wand2, RefreshCw, LayoutGrid, PaintBucket, MousePointer2, BoxSelect, ZoomIn, ZoomOut } from 'lucide-react';
+import { processTileset, isMagentaLikeHex } from '../services/imageProcessingService';
+import { TILE_SIZE, WORLD_WIDTH, WORLD_HEIGHT, GRID_UNIT } from '../constants';
+import { Wand2, RefreshCw, LayoutGrid, MousePointer2, ZoomIn, ZoomOut } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/8bit/card';
+import { Button } from '@/components/ui/8bit/button';
+import { Textarea } from '@/components/ui/8bit/textarea';
+import { Label } from '@/components/ui/8bit/label';
 
 interface WorldEngineProps {}
 
@@ -28,6 +31,11 @@ const WorldEngine: React.FC<WorldEngineProps> = () => {
     // Refs
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+    const tileCache = useRef<Map<number, HTMLCanvasElement>>(new Map());
+
+    useEffect(() => {
+        tileCache.current.clear();
+    }, [tileset]);
 
     // ---------------- GENERATION ----------------
     const handleGenerateTileset = async () => {
@@ -52,39 +60,75 @@ const WorldEngine: React.FC<WorldEngineProps> = () => {
 
     const handleGenerateLayout = () => {
         if (tileset.length === 0) return;
-        
-        // Simple Cellular Automata for "Caves"
-        // 1. Random Noise
+        const n = tileset.length;
         const newMap = new Int32Array(WORLD_WIDTH * WORLD_HEIGHT);
-        
-        // Assume: Tile 0 is Floor, Tile 1 is Wall, Tile 2 is Decor/Liquid
+        const fill = (x: number, y: number, tileIdx: number) => {
+            if (x >= 0 && x < WORLD_WIDTH && y >= 0 && y < WORLD_HEIGHT)
+                newMap[y * WORLD_WIDTH + x] = tileIdx;
+        };
+        // Tile roles: 0 = main floor, 1 = wall, 2 = liquid/secondary, 3+ = decor
         const floorIdx = 0;
-        const wallIdx = tileset.length > 1 ? 1 : 0;
-        
-        for (let i = 0; i < newMap.length; i++) {
-            newMap[i] = Math.random() < 0.45 ? wallIdx : floorIdx;
+        const wallIdx = n > 1 ? 1 : 0;
+        const liquidIdx = n > 2 ? 2 : floorIdx;
+        const decorStart = Math.min(3, n);
+        const decorEnd = n;
+
+        // 1. Border walls
+        for (let x = 0; x < WORLD_WIDTH; x++) {
+            fill(x, 0, wallIdx);
+            fill(x, WORLD_HEIGHT - 1, wallIdx);
         }
-        
-        // 2. Smoothing Steps (4 iterations)
+        for (let y = 0; y < WORLD_HEIGHT; y++) {
+            fill(0, y, wallIdx);
+            fill(WORLD_WIDTH - 1, y, wallIdx);
+        }
+
+        // 2. Interior: main floor with cellular automata for inner walls
+        for (let y = 1; y < WORLD_HEIGHT - 1; y++) {
+            for (let x = 1; x < WORLD_WIDTH - 1; x++) {
+                newMap[y * WORLD_WIDTH + x] = Math.random() < 0.42 ? wallIdx : floorIdx;
+            }
+        }
         for (let step = 0; step < 4; step++) {
-            const tempMap = new Int32Array(newMap);
-            for (let y = 1; y < WORLD_HEIGHT - 1; y++) {
-                for (let x = 1; x < WORLD_WIDTH - 1; x++) {
-                    let wallCount = 0;
-                    for (let dy = -1; dy <= 1; dy++) {
-                        for (let dx = -1; dx <= 1; dx++) {
-                            if (dy === 0 && dx === 0) continue;
-                            const idx = (y + dy) * WORLD_WIDTH + (x + dx);
-                            if (tempMap[idx] === wallIdx) wallCount++;
-                        }
-                    }
-                    const centerIdx = y * WORLD_WIDTH + x;
-                    if (wallCount > 4) newMap[centerIdx] = wallIdx;
-                    else if (wallCount < 4) newMap[centerIdx] = floorIdx;
+            const temp = new Int32Array(newMap);
+            for (let y = 2; y < WORLD_HEIGHT - 2; y++) {
+                for (let x = 2; x < WORLD_WIDTH - 2; x++) {
+                    let walls = 0;
+                    for (let dy = -1; dy <= 1; dy++)
+                        for (let dx = -1; dx <= 1; dx++)
+                            if (temp[(y + dy) * WORLD_WIDTH + (x + dx)] === wallIdx) walls++;
+                    const idx = y * WORLD_WIDTH + x;
+                    if (walls > 4) newMap[idx] = wallIdx;
+                    else if (walls < 4) newMap[idx] = floorIdx;
                 }
             }
         }
-        
+
+        // 3. Lava/river strip (use tile 2) – a few horizontal or vertical bands
+        if (liquidIdx !== floorIdx) {
+            const midY = Math.floor(WORLD_HEIGHT / 2);
+            for (let x = 2; x < WORLD_WIDTH - 2; x++) {
+                if (Math.random() < 0.85) fill(x, midY, liquidIdx);
+                if (Math.random() < 0.4) fill(x, midY + 1, liquidIdx);
+            }
+            const midX = Math.floor(WORLD_WIDTH / 2);
+            for (let y = 4; y < WORLD_HEIGHT - 4; y++) {
+                if (Math.random() < 0.7) fill(midX, y, liquidIdx);
+            }
+        }
+
+        // 4. Scatter decor (tiles 3, 4, 5, …) on floor only
+        for (let y = 2; y < WORLD_HEIGHT - 2; y++) {
+            for (let x = 2; x < WORLD_WIDTH - 2; x++) {
+                const idx = y * WORLD_WIDTH + x;
+                if (newMap[idx] !== floorIdx) continue;
+                if (Math.random() > 0.96) {
+                    const decorIdx = decorStart + Math.floor(Math.random() * (decorEnd - decorStart));
+                    if (decorIdx < n) newMap[idx] = decorIdx;
+                }
+            }
+        }
+
         setMapData(Array.from(newMap));
     };
 
@@ -150,27 +194,23 @@ const WorldEngine: React.FC<WorldEngineProps> = () => {
         
     }, [mapData, tileset, camera, zoom]);
 
-    // Simple Tile Renderer
-    const tileCache = useRef<Map<number, HTMLCanvasElement>>(new Map());
-    
     const renderTileToCtx = (ctx: CanvasRenderingContext2D, tile: WorldTile, x: number, y: number, scale: number) => {
         // Check cache
         const tileId = tileset.indexOf(tile);
         let cached = tileCache.current.get(tileId);
         
         if (!cached) {
-            // Create cache
             cached = document.createElement('canvas');
             cached.width = TILE_SIZE;
             cached.height = TILE_SIZE;
             const cCtx = cached.getContext('2d');
             if (cCtx) {
                 for (let i = 0; i < tile.pixels.length; i++) {
-                     const color = tile.palette[tile.pixels[i]];
-                     if (color) {
-                         cCtx.fillStyle = color;
-                         cCtx.fillRect(i % TILE_SIZE, Math.floor(i / TILE_SIZE), 1, 1);
-                     }
+                    const color = tile.palette[tile.pixels[i]];
+                    if (color && !isMagentaLikeHex(color)) {
+                        cCtx.fillStyle = color;
+                        cCtx.fillRect(i % TILE_SIZE, Math.floor(i / TILE_SIZE), 1, 1);
+                    }
                 }
             }
             tileCache.current.set(tileId, cached);
@@ -252,95 +292,119 @@ const WorldEngine: React.FC<WorldEngineProps> = () => {
     };
 
     return (
-        <div className="flex h-screen w-full bg-gray-950 text-gray-200 font-sans">
-            {/* Sidebar */}
-            <div className="w-80 flex-shrink-0 border-r border-gray-800 bg-gray-900 p-4 flex flex-col gap-4 z-20 shadow-xl">
-                 <div className="space-y-2">
-                    <label className="text-xs font-bold text-gray-400 uppercase">Step 1: The Theme</label>
-                    <textarea 
-                        className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs h-20"
-                        placeholder="e.g. Lava dungeon, Ice kingdom, Cyberpunk city streets..."
-                        value={prompt}
-                        onChange={e => setPrompt(e.target.value)}
-                    />
-                    <button 
-                        onClick={handleGenerateTileset}
-                        disabled={isGenerating}
-                        className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2 rounded text-xs font-bold flex items-center justify-center gap-2"
-                    >
-                        {isGenerating ? <RefreshCw className="animate-spin" size={12}/> : <Wand2 size={12}/>}
-                        GENERATE TILESET
-                    </button>
-                 </div>
-                 
-                 <div className="flex-1 overflow-y-auto border border-gray-800 rounded bg-gray-950 p-2">
-                    <div className="grid grid-cols-4 gap-1">
+        <div className="flex h-full w-full bg-[#0d0d0d] text-gray-200 retro">
+            {/* Sidebar – 8bitcn */}
+            <aside
+                className="shrink-0 flex flex-col border-r-4 border-amber-900/80 bg-[#141414] z-20 overflow-hidden pixelated"
+                style={{ width: GRID_UNIT * 32, padding: GRID_UNIT * 2, gap: GRID_UNIT * 2 }}
+            >
+                <Card className="bg-[#1a1a1a] border-2 border-amber-900/60">
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-xs uppercase tracking-wider text-amber-200/90">Step 1: Theme</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                        <Label className="text-[10px] uppercase text-gray-400">Describe your world</Label>
+                        <Textarea
+                            placeholder="e.g. Dungeon with stone floors and lava rivers..."
+                            value={prompt}
+                            onChange={e => setPrompt(e.target.value)}
+                            className="min-h-[72px] text-xs resize-none"
+                        />
+                        <Button
+                            onClick={handleGenerateTileset}
+                            disabled={isGenerating}
+                            className="w-full game-button game-interactive game-focus-pixel"
+                        >
+                            {isGenerating ? <RefreshCw className="animate-spin" size={12} /> : <Wand2 size={12} />}
+                            {' '}GENERATE TILESET
+                        </Button>
+                    </CardContent>
+                </Card>
+
+                <div className="flex-1 min-h-0 flex flex-col border-2 border-amber-900/50 rounded bg-black/40 p-2">
+                    <Label className="text-[10px] uppercase text-gray-400 mb-1">Tiles</Label>
+                    <div className="grid grid-cols-4 gap-1 overflow-y-auto min-h-0">
                         {tileset.map((tile, i) => (
-                            <div 
-                                key={i}
+                            <button
+                                key={tile.id}
+                                type="button"
                                 onClick={() => setSelectedTileIndex(i)}
-                                className={`relative aspect-square cursor-pointer border-2 group ${selectedTileIndex === i ? 'border-white' : 'border-transparent hover:border-gray-600'}`}
+                                className={`relative aspect-square cursor-pointer border-2 game-interactive game-focus-pixel overflow-hidden ${selectedTileIndex === i ? 'border-amber-400 shadow-[0_0_0_1px_rgba(251,191,36,0.5)]' : 'border-transparent hover:border-gray-500'}`}
                             >
                                 <TilePreview tile={tile} />
-                                <div className="absolute bottom-0 right-0 p-0.5 bg-black/50 text-[8px]">
-                                    {tile.isWall ? 'WALL' : ''}
-                                </div>
-                                <button 
-                                    onClick={(e) => { e.stopPropagation(); toggleWall(i); }}
-                                    className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 bg-red-500 text-white w-4 h-4 rounded-full flex items-center justify-center text-[8px]"
+                                {tile.isWall && (
+                                    <span className="absolute bottom-0 right-0 px-1 py-0.5 bg-black/70 text-[8px] text-red-300">W</span>
+                                )}
+                                <span
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={e => { e.stopPropagation(); toggleWall(i); }}
+                                    className="absolute top-0 right-0 w-4 h-4 flex items-center justify-center bg-red-600/90 text-white text-[8px] opacity-0 hover:opacity-100 focus:opacity-100"
                                     title="Toggle Wall"
                                 >
                                     W
-                                </button>
-                            </div>
+                                </span>
+                            </button>
                         ))}
                     </div>
                     {tileset.length === 0 && (
-                        <div className="h-full flex items-center justify-center text-gray-600 text-xs text-center px-4">
-                            Generate a tileset to begin building your world.
+                        <div className="flex-1 flex items-center justify-center text-gray-500 text-xs text-center px-2">
+                            Generate a tileset to begin.
                         </div>
                     )}
-                 </div>
-                 
-                 <div className="space-y-2 border-t border-gray-800 pt-4">
-                     <label className="text-xs font-bold text-gray-400 uppercase">Step 2: The Map</label>
-                     <button 
-                        onClick={handleGenerateLayout}
-                        disabled={tileset.length === 0}
-                        className="w-full bg-emerald-700 hover:bg-emerald-600 text-white py-2 rounded text-xs font-bold flex items-center justify-center gap-2"
-                     >
-                        <LayoutGrid size={12}/> AUTO-GENERATE WORLD
-                     </button>
-                 </div>
-            </div>
+                </div>
+
+                <Card className="bg-[#1a1a1a] border-2 border-amber-900/60">
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-xs uppercase tracking-wider text-amber-200/90">Step 2: Map</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <Button
+                            onClick={handleGenerateLayout}
+                            disabled={tileset.length === 0}
+                            variant="secondary"
+                            className="w-full game-button game-interactive game-focus-pixel bg-emerald-800/80 hover:bg-emerald-700 border-2 border-emerald-600/60"
+                        >
+                            <LayoutGrid size={12} /> AUTO-GENERATE WORLD
+                        </Button>
+                    </CardContent>
+                </Card>
+            </aside>
 
             {/* Main Canvas */}
             <div ref={containerRef} className="flex-1 relative overflow-hidden bg-[#0f1016]">
-                <canvas 
+                <canvas
                     ref={canvasRef}
                     onMouseDown={handleMouseDown}
                     onMouseMove={handleMouseMove}
                     onMouseUp={handleMouseUp}
                     onMouseLeave={handleMouseUp}
-                    className="block cursor-crosshair"
+                    className="block cursor-crosshair pixelated"
                 />
-                
-                {/* Floating Toolbar */}
-                <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-gray-900 border border-gray-700 rounded-full px-4 py-2 flex items-center gap-4 shadow-xl">
-                    <button onClick={() => setTool('PAINT')} className={`p-2 rounded-full ${tool === 'PAINT' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`}>
-                        <MousePointer2 size={16} />
-                    </button>
-                    <div className="h-4 w-px bg-gray-700"/>
-                    <button onClick={() => setZoom(z => Math.max(0.2, z - 0.2))} className="text-gray-400 hover:text-white"><ZoomOut size={16}/></button>
-                    <span className="text-xs font-mono w-12 text-center text-gray-300">{Math.round(zoom*100)}%</span>
-                    <button onClick={() => setZoom(z => Math.min(4, z + 0.2))} className="text-gray-400 hover:text-white"><ZoomIn size={16}/></button>
-                    <div className="h-4 w-px bg-gray-700"/>
-                    <div className="text-[10px] text-gray-500 font-mono">
-                        {WORLD_WIDTH}x{WORLD_HEIGHT}
-                    </div>
+                <div
+                    className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded border-2 border-amber-900/60 bg-[#141414] shadow-lg pixelated"
+                    style={{ gap: GRID_UNIT }}
+                >
+                    <Button
+                        size="icon"
+                        variant={tool === 'PAINT' ? 'default' : 'ghost'}
+                        onClick={() => setTool('PAINT')}
+                        className="game-button game-interactive game-focus-pixel size-8"
+                    >
+                        <MousePointer2 size={14} />
+                    </Button>
+                    <div className="w-px h-4 bg-amber-900/50" />
+                    <Button size="icon" variant="ghost" onClick={() => setZoom(z => Math.max(0.2, z - 0.2))} className="game-button game-interactive size-8 text-gray-400 hover:text-white">
+                        <ZoomOut size={14} />
+                    </Button>
+                    <span className="text-xs font-mono w-10 text-center text-gray-300">{Math.round(zoom * 100)}%</span>
+                    <Button size="icon" variant="ghost" onClick={() => setZoom(z => Math.min(4, z + 0.2))} className="game-button game-interactive size-8 text-gray-400 hover:text-white">
+                        <ZoomIn size={14} />
+                    </Button>
+                    <div className="w-px h-4 bg-amber-900/50" />
+                    <span className="text-[10px] text-gray-500 font-mono">{WORLD_WIDTH}×{WORLD_HEIGHT}</span>
                 </div>
-                
-                <div className="absolute bottom-4 right-4 bg-black/70 backdrop-blur px-3 py-1 rounded text-xs text-gray-400 border border-gray-800">
+                <div className="absolute bottom-4 right-4 px-3 py-1.5 rounded border border-amber-900/40 bg-black/70 text-[10px] text-gray-400 pixelated">
                     Hold SHIFT to Pan
                 </div>
             </div>
@@ -348,23 +412,22 @@ const WorldEngine: React.FC<WorldEngineProps> = () => {
     );
 };
 
-// Mini Preview Component
-const TilePreview: React.FC<{tile: WorldTile}> = ({tile}) => {
+const TilePreview: React.FC<{ tile: WorldTile }> = ({ tile }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     useEffect(() => {
         const ctx = canvasRef.current?.getContext('2d');
         if (ctx) {
-            ctx.clearRect(0,0,32,32);
-             for (let i = 0; i < tile.pixels.length; i++) {
-                 const color = tile.palette[tile.pixels[i]];
-                 if (color) {
-                     ctx.fillStyle = color;
-                     ctx.fillRect(i % 32, Math.floor(i / 32), 1, 1);
-                 }
+            ctx.clearRect(0, 0, 32, 32);
+            for (let i = 0; i < tile.pixels.length; i++) {
+                const color = tile.palette[tile.pixels[i]];
+                if (color && !isMagentaLikeHex(color)) {
+                    ctx.fillStyle = color;
+                    ctx.fillRect(i % 32, Math.floor(i / 32), 1, 1);
+                }
             }
         }
     }, [tile]);
-    return <canvas ref={canvasRef} width={32} height={32} className="w-full h-full image-pixelated" />;
-}
+    return <canvas ref={canvasRef} width={32} height={32} className="w-full h-full pixelated" />;
+};
 
 export default WorldEngine;

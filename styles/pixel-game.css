@@ -1,0 +1,167 @@
+/**
+ * PixelForge — production 8-bit game client styles
+ * No layout shift, no overflow scrollbars, pixel-perfect, game feel.
+ */
+
+/* ---------------------------------------------------------------------------
+   CSS custom properties (8px grid, game colors)
+   --------------------------------------------------------------------------- */
+:root {
+  --grid: 8px;
+  --game-bg: #0d0d0d;
+  --game-panel: #141414;
+  --game-panel-border: rgba(180, 130, 70, 0.4);
+  --game-text: #e2e8f0;
+  --game-text-muted: #64748b;
+  --game-focus: #f59e0b;
+  --game-focus-ring: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   Global game behavior
+   --------------------------------------------------------------------------- */
+.game-root {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+  -webkit-tap-highlight-color: transparent;
+  overflow: hidden;
+  width: 100vw;
+  height: 100dvh;
+  max-height: 100vh;
+  background: var(--game-bg);
+  color: var(--game-text);
+  box-sizing: border-box;
+}
+
+.game-root *,
+.game-root *::before,
+.game-root *::after {
+  box-sizing: border-box;
+}
+
+/* Interactive elements: pointer, no default focus ring */
+.game-interactive {
+  cursor: pointer;
+}
+
+.game-interactive:focus {
+  outline: none;
+}
+
+.game-interactive:focus-visible {
+  outline: var(--game-focus-ring) solid var(--game-focus);
+  outline-offset: 2px;
+}
+
+/* Pixel-style focus (optional override for 8bitcn) */
+.game-focus-pixel:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--game-bg), 0 0 0 4px var(--game-focus);
+}
+
+/* Button press animation */
+.game-button {
+  cursor: pointer;
+  user-select: none;
+}
+
+.game-button:active {
+  transform: translateY(1px);
+}
+
+/* Pixel-perfect canvas / images */
+.pixelated {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* No fractional layout — snap to pixel */
+.game-snap {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+/* ---------------------------------------------------------------------------
+   Layout: fullscreen lock, no scroll
+   --------------------------------------------------------------------------- */
+.game-layout {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  position: fixed;
+  inset: 0;
+}
+
+.game-layout-row {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.game-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Spacing (8px grid)
+   --------------------------------------------------------------------------- */
+.game-gap-1 { gap: var(--grid); }
+.game-gap-2 { gap: calc(var(--grid) * 2); }
+.game-gap-3 { gap: calc(var(--grid) * 3); }
+.game-gap-4 { gap: calc(var(--grid) * 4); }
+.game-p-1 { padding: var(--grid); }
+.game-p-2 { padding: calc(var(--grid) * 2); }
+.game-p-3 { padding: calc(var(--grid) * 3); }
+
+/* ---------------------------------------------------------------------------
+   Optional: CRT overlay (toggle)
+   --------------------------------------------------------------------------- */
+.crt-overlay {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+  z-index: 9998;
+}
+
+/* ---------------------------------------------------------------------------
+   Optional: scanline background
+   --------------------------------------------------------------------------- */
+.scanline-bg {
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 1px,
+    rgba(0, 0, 0, 0.04) 1px,
+    rgba(0, 0, 0, 0.04) 2px
+  );
+}
+
+/* ---------------------------------------------------------------------------
+   Sprite preview glow
+   --------------------------------------------------------------------------- */
+.sprite-glow {
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.25);
+}
+
+/* ---------------------------------------------------------------------------
+   Preview character shadow
+   --------------------------------------------------------------------------- */
+.sprite-shadow {
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.5));
+}

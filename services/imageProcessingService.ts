@@ -27,14 +27,21 @@ const colorDistance = (c1: RGB, c2: RGB): number => {
   );
 };
 
-// Helper: Is this pixel likely a magenta background fringe?
-const isMagentaFringe = (r: number, g: number, b: number): boolean => {
-    // If Green is low, and Red/Blue are significant and relatively balanced
-    if (g < 50 && r > 50 && b > 50) {
-        if (Math.abs(r - b) < 40) return true;
-    }
-    return false;
-};
+const MAGENTA_REF: RGB = { r: 255, g: 0, b: 255, a: 255 };
+const MAGENTA_TOLERANCE = 130; // Catch anti-aliased/compressed magenta (#FF66FF, etc.)
+
+/** Any pink/magenta → treat as transparent. Used in pipeline and sprite sheet processing. */
+export function isMagentaLike(r: number, g: number, b: number, tolerance = MAGENTA_TOLERANCE): boolean {
+  return colorDistance({ r, g, b, a: 255 }, MAGENTA_REF) < tolerance;
+}
+
+/** Hex color (e.g. "#ff00ff") is magenta-like → treat as transparent when drawing. */
+export function isMagentaLikeHex(hex: string, tolerance = MAGENTA_TOLERANCE): boolean {
+  const c = hexToRgb(hex);
+  return isMagentaLike(c.r, c.g, c.b, tolerance);
+}
+
+const isMagentaFringe = (r: number, g: number, b: number): boolean => isMagentaLike(r, g, b);
 
 // Helper: Get Dominant Color (Max Coverage)
 const getDominantColor = (data: Uint8ClampedArray): RGB => {
@@ -174,7 +181,11 @@ export const processImageToMatrix = async (
                 matchedIndex = bestIdx;
                 paletteMap.set(hex, matchedIndex);
             } else {
-                // Add new color
+                // Never add magenta/pink to palette — treat as transparent
+                if (isMagentaLike(r, g, b)) {
+                  pixels[i] = 0;
+                  continue;
+                }
                 palette.push(hex);
                 matchedIndex = palette.length - 1;
                 paletteMap.set(hex, matchedIndex);
@@ -259,14 +270,15 @@ export const processSpriteSheet = async (
                         continue;
                     }
 
-                    // Find closest color in EXISTING palette
-                    let bestIdx = 1; 
+                    // Find closest color in EXISTING palette (skip magenta-like entries)
+                    let bestIdx = 0;
                     let bestDist = Infinity;
-                    
-                    for(let p=1; p<existingPalette.length; p++) {
-                        const pColor = hexToRgb(existingPalette[p] as string);
-                        const dist = colorDistance({r,g,b}, pColor);
-                        if(dist < bestDist) {
+                    for (let p = 1; p < existingPalette.length; p++) {
+                        const hex = existingPalette[p];
+                        if (!hex || isMagentaLikeHex(hex)) continue;
+                        const pColor = hexToRgb(hex);
+                        const dist = colorDistance({ r, g, b }, pColor);
+                        if (dist < bestDist) {
                             bestDist = dist;
                             bestIdx = p;
                         }
@@ -353,7 +365,7 @@ export const processTileset = async (base64Sheet: string): Promise<WorldTile[]> 
                             continue;
                         }
 
-                        const isFringe = isMagentaFringe(r,g,b);
+                        const isFringe = isMagentaLike(r, g, b);
                         const isBg = colorDistance({r,g,b}, bgColor) < bgTolerance;
 
                         if (isBg || isFringe) {
@@ -362,6 +374,10 @@ export const processTileset = async (base64Sheet: string): Promise<WorldTile[]> 
                         }
 
                         const hex = rgbToHex(r, g, b);
+                        if (isMagentaLikeHex(hex)) {
+                            pixels.push(0);
+                            continue;
+                        }
                         if (!paletteMap.has(hex)) {
                             palette.push(hex);
                             paletteMap.set(hex, palette.length - 1);
