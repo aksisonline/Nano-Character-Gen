@@ -1,3 +1,4 @@
+
 import { GoogleGenAI } from "@google/genai";
 import { MODEL_NAME } from "../constants";
 
@@ -123,3 +124,53 @@ export const generateAnimationSheet = async (baseSpriteBase64: string, userPromp
         throw error;
     }
 }
+
+export const generateTileset = async (userPrompt: string): Promise<string> => {
+  if (!apiKey) throw new Error("API Key is missing.");
+
+  const systemPrompt = `
+    Generate a 4x4 Grid Tileset (16 unique tiles total) for a top-down 8-bit RPG game.
+    Theme: ${userPrompt}
+    
+    Each tile is 32x32 pixels. The total image should be square.
+    
+    CONTENTS (Mix of these):
+    - Floor/Ground textures (Grass, Dirt, Stone, Wood)
+    - Walls/Obstacles (Brick, Rock, Tree base, Water)
+    - Decorative items (Flowers, Cracks, Pebbles)
+    
+    STYLE:
+    - 8-bit pixel art.
+    - Flat top-down perspective.
+    - High contrast.
+    
+    BACKGROUND:
+    - SOLID MAGENTA (#FF00FF) for any transparent areas.
+    - Full tile coverage is preferred for ground tiles.
+  `;
+
+  try {
+      const response = await ai.models.generateContent({
+          model: MODEL_NAME,
+          contents: {
+              parts: [{ text: systemPrompt }]
+          },
+          config: {
+              imageConfig: {
+                  aspectRatio: "1:1"
+              }
+          }
+      });
+
+      for (const part of response.candidates?.[0]?.content?.parts || []) {
+          if (part.inlineData) {
+              return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+          }
+      }
+      
+      throw new Error("No tileset generated.");
+  } catch (error) {
+      console.error("Gemini Tileset Error:", error);
+      throw error;
+  }
+};

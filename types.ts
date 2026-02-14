@@ -1,3 +1,4 @@
+
 export interface RGB {
   r: number;
   g: number;
@@ -47,4 +48,24 @@ export enum ToolMode {
 export enum AppPhase {
   EDITOR = 'EDITOR',
   ANIMATOR = 'ANIMATOR'
+}
+
+export enum EngineMode {
+  CHARACTER = 'CHARACTER',
+  WORLD = 'WORLD'
+}
+
+export interface WorldTile {
+  id: string;
+  pixels: number[];
+  palette: (string | null)[];
+  isWall: boolean;
+  name: string;
+}
+
+export interface WorldData {
+  width: number;
+  height: number;
+  map: number[]; // 1D array of Tile Indices (not palette indices, but index in the tileset array)
+  tileset: WorldTile[];
 }

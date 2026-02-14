@@ -1,5 +1,6 @@
-import { SPRITE_WIDTH, SPRITE_HEIGHT } from "../constants";
-import { SpriteMatrix, RGB } from "../types";
+
+import { SPRITE_WIDTH, SPRITE_HEIGHT, TILE_SIZE } from "../constants";
+import { SpriteMatrix, RGB, WorldTile } from "../types";
 
 // Helper: Hex to RGB
 const hexToRgb = (hex: string): RGB => {
@@ -307,3 +308,79 @@ export const processSpriteSheet = async (
         img.src = base64Sheet;
     });
 }
+
+export const processTileset = async (base64Sheet: string): Promise<WorldTile[]> => {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = "Anonymous";
+        img.onload = () => {
+            const rows = 4;
+            const cols = 4;
+            const cellW = img.width / cols;
+            const cellH = img.height / rows;
+            
+            const tiles: WorldTile[] = [];
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = TILE_SIZE;
+                    canvas.height = TILE_SIZE;
+                    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+                    if (!ctx) continue;
+
+                    ctx.imageSmoothingEnabled = false;
+                    ctx.drawImage(img, c * cellW, r * cellH, cellW, cellH, 0, 0, TILE_SIZE, TILE_SIZE);
+                    
+                    const imageData = ctx.getImageData(0, 0, TILE_SIZE, TILE_SIZE);
+                    const data = imageData.data;
+                    const pixels: number[] = [];
+                    const palette: (string | null)[] = [null]; // Start with transparent
+                    const paletteMap = new Map<string, number>();
+
+                    const bgColor = getDominantColor(data);
+                    const bgTolerance = 110;
+
+                    for(let i=0; i<TILE_SIZE*TILE_SIZE; i++) {
+                        const off = i*4;
+                        const r = data[off];
+                        const g = data[off+1];
+                        const b = data[off+2];
+                        const a = data[off+3];
+
+                        if (a < 128) {
+                            pixels.push(0);
+                            continue;
+                        }
+
+                        const isFringe = isMagentaFringe(r,g,b);
+                        const isBg = colorDistance({r,g,b}, bgColor) < bgTolerance;
+
+                        if (isBg || isFringe) {
+                            pixels.push(0);
+                            continue;
+                        }
+
+                        const hex = rgbToHex(r, g, b);
+                        if (!paletteMap.has(hex)) {
+                            palette.push(hex);
+                            paletteMap.set(hex, palette.length - 1);
+                        }
+                        pixels.push(paletteMap.get(hex)!);
+                    }
+                    
+                    tiles.push({
+                        id: `tile_${r}_${c}`,
+                        pixels,
+                        palette,
+                        isWall: false, // Default
+                        name: `Tile ${tiles.length + 1}`
+                    });
+                }
+            }
+            resolve(tiles);
+        };
+        img.onerror = reject;
+        img.src = base64Sheet;
+    });
+};

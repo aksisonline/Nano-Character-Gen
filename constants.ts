@@ -1,8 +1,13 @@
+
 export const SPRITE_WIDTH = 32;
 export const SPRITE_HEIGHT = 48;
 export const GENERATION_SCALE = 16;
 export const GEN_WIDTH = SPRITE_WIDTH * GENERATION_SCALE; // 512
 export const GEN_HEIGHT = SPRITE_HEIGHT * GENERATION_SCALE; // 768
+
+export const TILE_SIZE = 32;
+export const WORLD_WIDTH = 200;
+export const WORLD_HEIGHT = 500;
 
 export const INITIAL_PALETTE: (string | null)[] = [
   null, // Transparent
