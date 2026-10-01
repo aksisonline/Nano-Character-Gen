@@ -9,6 +9,7 @@ interface PixelEaselProps {
   selectedColorIndex: number;
   toolMode: ToolMode;
   onUpdatePixel: (index: number, colorIndex: number) => void;
+  onPickColor?: (colorIndex: number) => void;
   showGrid: boolean;
 }
 

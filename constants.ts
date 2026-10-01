@@ -26,15 +26,41 @@ export const GRID_UNIT = 8;
 export const CHECKER_LIGHT = '#2d3748';
 export const CHECKER_DARK = '#1a202c';
 
-export const TILE_SIZE = 32;
-/** World map size: small layout so auto-gen uses tiles meaningfully. */
-export const WORLD_WIDTH = 52;
-export const WORLD_HEIGHT = 40;
+/* ---------------------------------------------------------------------------
+   Animations — the user defines them one by one
+   --------------------------------------------------------------------------- */
+
+/** Frame counts an animation can be generated with. */
+export const FRAME_COUNT_OPTIONS = [1, 2, 3, 4, 6, 8] as const;
+export const DEFAULT_FRAME_COUNT = 4;
+
+/** Playback rates offered per animation. */
+export const FPS_OPTIONS = [1, 2, 4, 6, 8, 12, 24] as const;
+export const DEFAULT_FPS = 6;
+
+/** Starter presets offered when adding an animation. */
+export const ANIMATION_PRESETS: { name: string; prompt: string }[] = [
+  { name: 'Idle', prompt: 'a gentle breathing bob in place, standing, arms relaxed' },
+  { name: 'Walk', prompt: 'a side-view walk cycle, left foot forward then right foot forward' },
+  { name: 'Run', prompt: 'a fast running cycle, leaning forward, arms pumping' },
+  { name: 'Jump', prompt: 'a jump: crouch, launch upward, then land and settle' },
+  { name: 'Attack', prompt: 'a sword slash: wind up, swing, then recover to stance' },
+  { name: 'Hurt', prompt: 'a hit reaction: recoil backwards, then return to stance' },
+];
+
+/* ---------------------------------------------------------------------------
+   GIF export
+   --------------------------------------------------------------------------- */
+
+/** Integer upscales offered for GIF export (no fractional scaling). */
+export const GIF_EXPORT_SCALES = [1, 2, 4, 6, 8] as const;
+export const DEFAULT_GIF_EXPORT_SCALE = 6;
+
 
 /**
  * Character gen strategy: AI (e.g. Gemini) cannot reliably output exact 32x48 pixel art.
  * We request a higher-resolution image (3:4 aspect) with clear "large eyes" (3x3 px) in the prompt,
- * then downsample to 32x48 in processImageToMatrix with imageSmoothingEnabled = false so details
+ * then downsample to 32x48 in runSpritePipeline with imageSmoothingEnabled = false so details
  * (especially eyes) survive as crisp pixels. No extra de-rez step is needed beyond that.
  */
 

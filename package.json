@@ -10,8 +10,10 @@
   },
   "dependencies": {
     "@google/genai": "^1.41.0",
+    "@radix-ui/react-label": "^2.1.15",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "gifenc": "^1.0.3",
     "lucide-react": "^0.564.0",
     "radix-ui": "^1.4.3",
     "react": "^19.2.4",
@@ -21,6 +23,8 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
     "@types/node": "^22.14.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^5.0.0",
     "shadcn": "^3.8.4",
     "tailwindcss": "^4.1.18",

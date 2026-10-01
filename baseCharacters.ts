@@ -33,11 +33,10 @@ function createBaseMatrix(name: string, pixels: number[]): SpriteMatrix {
       width: W,
       height: H,
       created_at: Date.now(),
-      fps: { idle: 0.5, walk: 4, special: 8 },
     },
     palette: [...INITIAL_PALETTE],
     pixels: [...pixels],
-    matrix: { idle: [], walk: [], jump: [], special: [] },
+    animations: [],
   };
 }
 

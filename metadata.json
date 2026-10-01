@@ -1,5 +1,5 @@
 {
-  "name": "PixelForge 8-Bit Engine",
-  "description": "An AI-powered sprite engine that generates, processes, and refines 8-bit characters using 16x integer scaling and matrix data structures.",
+  "name": "PixelForge Sprite Studio",
+  "description": "An AI-powered pixel-art character studio for editing sprites, defining animations individually, previewing clips, and exporting transparent GIFs.",
   "requestFramePermissions": []
 }

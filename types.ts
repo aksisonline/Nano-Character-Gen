@@ -6,10 +6,27 @@ export interface RGB {
   a?: number;
 }
 
-export interface AnimationMeta {
-  idle: number;
-  walk: number;
-  special: number;
+/** Generation progress of a single user-defined animation. */
+export type AnimationStatus = 'empty' | 'generating' | 'ready' | 'error';
+
+/**
+ * One animation of a character. Animations are defined one by one by the user:
+ * a name, a motion description used to prompt the model, and playback settings.
+ */
+export interface SpriteAnimation {
+  id: string;
+  name: string;
+  /** Motion description, e.g. "a slow two frame breathing bob in place". */
+  prompt: string;
+  /** Number of frames requested when generating this animation. */
+  frameCount: number;
+  /** Frames per second used for preview playback and GIF export. */
+  fps: number;
+  /** Loop forever (true) or play once and hold the last frame (false). */
+  loop: boolean;
+  /** Each frame is a 1D array of palette indices, SPRITE_WIDTH * SPRITE_HEIGHT long. */
+  frames: number[][];
+  status: AnimationStatus;
 }
 
 export interface SpriteMatrix {
@@ -17,55 +34,21 @@ export interface SpriteMatrix {
     name: string;
     width: number;
     height: number;
-    fps: AnimationMeta;
     created_at: number;
   };
   palette: (string | null)[]; // Hex codes, null is transparent
   pixels: number[]; // 1D array of indices pointing to palette for the Base Sprite (Editor view)
-  // The matrix object holds the animation frames
-  matrix: {
-    idle: number[][]; 
-    walk: number[][];
-    jump: number[][];
-    special: number[][];
-  };
-}
-
-export interface ProcessingConfig {
-  targetWidth: number;
-  targetHeight: number;
-  colorTolerance: number; // For background removal
-  maxPaletteSize: number;
+  animations: SpriteAnimation[];
 }
 
 export enum ToolMode {
   PENCIL = 'PENCIL',
   ERASER = 'ERASER',
-  PICKER = 'PICKER',
-  BUCKET = 'BUCKET'
+  PICKER = 'PICKER'
 }
 
 export enum AppPhase {
+  CREATE = 'CREATE',
   EDITOR = 'EDITOR',
   ANIMATOR = 'ANIMATOR'
-}
-
-export enum EngineMode {
-  CHARACTER = 'CHARACTER',
-  WORLD = 'WORLD'
-}
-
-export interface WorldTile {
-  id: string;
-  pixels: number[];
-  palette: (string | null)[];
-  isWall: boolean;
-  name: string;
-}
-
-export interface WorldData {
-  width: number;
-  height: number;
-  map: number[]; // 1D array of Tile Indices (not palette indices, but index in the tileset array)
-  tileset: WorldTile[];
 }

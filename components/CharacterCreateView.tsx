@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/8bit/c
 import { Button } from '@/components/ui/8bit/button';
 import { Input } from '@/components/ui/8bit/input';
 import { Label } from '@/components/ui/8bit/label';
+import BaseCharacterSelect from './BaseCharacterSelect';
 
 interface CharacterCreateViewProps {
   characterName: string;
@@ -14,11 +15,11 @@ interface CharacterCreateViewProps {
   onDescriptionChange: (value: string) => void;
   onCreate: () => void;
   isGenerating: boolean;
-  isAnimating: boolean;
   error: string | null;
   matrix: SpriteMatrix;
   scale: number;
   onEditSprite: () => void;
+  onSelectTemplate: (matrix: SpriteMatrix) => void;
 }
 
 const CharacterCreateView: React.FC<CharacterCreateViewProps> = ({
@@ -28,11 +29,11 @@ const CharacterCreateView: React.FC<CharacterCreateViewProps> = ({
   onDescriptionChange,
   onCreate,
   isGenerating,
-  isAnimating,
   error,
   matrix,
   scale,
   onEditSprite,
+  onSelectTemplate,
 }) => {
   const hasSprite =
     matrix.pixels.some((p) => p !== 0) ||
@@ -46,12 +47,12 @@ const CharacterCreateView: React.FC<CharacterCreateViewProps> = ({
         <div className="game-center flex-1 min-h-0 relative" style={{ padding: GRID_UNIT * 6 }}>
           {isEmpty && (
             <p className="text-sm text-gray-600 absolute inset-0 flex items-center justify-center pointer-events-none retro">
-              Enter your name and create
+              Add a name and description, or start from a template
             </p>
           )}
-          {(isGenerating || isAnimating) && (
+          {isGenerating && (
             <p className="text-xs text-amber-400/90 absolute bottom-8 left-1/2 -translate-x-1/2 pointer-events-none retro">
-              {isGenerating ? 'Creating sprite…' : 'Creating animations…'}
+              Creating sprite…
             </p>
           )}
           {hasSprite && !isEmpty && (
@@ -79,12 +80,12 @@ const CharacterCreateView: React.FC<CharacterCreateViewProps> = ({
       >
         <Card className="w-full">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm retro">Create character</CardTitle>
+            <CardTitle className="text-sm retro">Create a character</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-2">
               <Label htmlFor="char-name" className="text-xs retro">
-                Enter your name
+                Character name
               </Label>
               <Input
                 id="char-name"
@@ -97,7 +98,7 @@ const CharacterCreateView: React.FC<CharacterCreateViewProps> = ({
             </div>
             <div className="grid gap-2">
               <Label htmlFor="char-desc" className="text-xs retro">
-                Description
+                Character description
               </Label>
               <Input
                 id="char-desc"
@@ -113,13 +114,17 @@ const CharacterCreateView: React.FC<CharacterCreateViewProps> = ({
               disabled={isGenerating || !characterName.trim()}
               className="w-full retro game-button game-focus-pixel"
             >
-              {isGenerating ? 'Creating…' : 'Create'}
+              {isGenerating ? 'Creating…' : 'Generate sprite'}
             </Button>
             {error && (
               <p className="text-[10px] text-red-400">{error}</p>
             )}
           </CardContent>
         </Card>
+
+        <div className="mt-4">
+          <BaseCharacterSelect onSelect={onSelectTemplate} />
+        </div>
 
         {hasSprite && (
           <Card className="w-full mt-4">
@@ -128,7 +133,7 @@ const CharacterCreateView: React.FC<CharacterCreateViewProps> = ({
                 {characterName.trim() || matrix.meta?.name || 'Character'}
               </p>
               <p className="text-[10px] text-muted-foreground mt-1 retro">
-                32×48 · Animations in background
+                32×48 · Ready to edit
               </p>
               <Button
                 variant="outline"

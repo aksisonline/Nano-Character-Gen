@@ -27,6 +27,7 @@ interface SpriteCanvasProps {
   selectedColorIndex: number;
   toolMode: ToolMode;
   onUpdatePixel: (index: number, colorIndex: number) => void;
+  onPickColor?: (colorIndex: number) => void;
   showGrid: boolean;
   /** Optional: no interaction (e.g. 1x preview) */
   readOnly?: boolean;
@@ -42,6 +43,7 @@ const SpriteCanvas: React.FC<SpriteCanvasProps> = ({
   selectedColorIndex,
   toolMode,
   onUpdatePixel,
+  onPickColor,
   showGrid,
   readOnly = false,
   glow = false,
@@ -109,7 +111,7 @@ const SpriteCanvas: React.FC<SpriteCanvasProps> = ({
   const handlePointerDown = (e: React.PointerEvent) => {
     if (readOnly) return;
     e.preventDefault();
-    setIsDrawing(true);
+    setIsDrawing(toolMode !== ToolMode.PICKER);
     handleDraw(e);
   };
 
@@ -137,7 +139,10 @@ const SpriteCanvas: React.FC<SpriteCanvasProps> = ({
     const index = y * SPRITE_WIDTH + x;
     let newColorIndex = selectedColorIndex;
     if (toolMode === ToolMode.ERASER) newColorIndex = 0;
-    else if (toolMode === ToolMode.PICKER) return;
+    else if (toolMode === ToolMode.PICKER) {
+      onPickColor?.(matrix.pixels[index] ?? 0);
+      return;
+    }
     if (matrix.pixels[index] !== newColorIndex) {
       onUpdatePixel(index, newColorIndex);
     }

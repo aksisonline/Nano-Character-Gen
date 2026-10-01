@@ -1,9 +1,15 @@
 
 import { GoogleGenAI } from "@google/genai";
-import { MODEL_NAME } from "../constants";
+import { MODEL_NAME, SPRITE_HEIGHT, SPRITE_WIDTH } from "../constants";
 
 const apiKey = process.env.API_KEY || '';
-const ai = new GoogleGenAI({ apiKey });
+let ai: GoogleGenAI | undefined;
+
+function getAI(): GoogleGenAI {
+  if (!apiKey) throw new Error('API Key is missing.');
+  ai ??= new GoogleGenAI({ apiKey });
+  return ai;
+}
 
 export const generateSpriteImage = async (userPrompt: string): Promise<string> => {
   if (!apiKey) {
@@ -30,7 +36,7 @@ export const generateSpriteImage = async (userPrompt: string): Promise<string> =
   `;
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await getAI().models.generateContent({
       model: MODEL_NAME,
       contents: {
         parts: [
@@ -57,120 +63,77 @@ export const generateSpriteImage = async (userPrompt: string): Promise<string> =
   }
 };
 
-export const generateAnimationSheet = async (baseSpriteBase64: string, userPrompt: string): Promise<string> => {
-    if (!apiKey) throw new Error("API Key is missing.");
-
-    const systemPrompt = `
-      You are an expert 8-bit sprite animator. 
-      I will provide a base character sprite. 
-      Generate a 3x3 Grid Sprite Sheet (9 frames total) based on this character.
-      
-      CONSISTENCY RULES:
-      - The FACE, EYES, and HEAD SHAPE must remain PIXEL-PERFECT IDENTICAL to the base sprite in all frames.
-      - Maintain the EXACT palette and proportions.
-      - Background must be SOLID MAGENTA (#FF00FF).
-      
-      CRITICAL - WALK CYCLE RULES:
-      - Do NOT add new weapons. If the base sprite holds a sword, keep it. If empty handed, STAY empty handed.
-      - Arms swinging, legs moving.
-      
-      GRID LAYOUT (Read carefully):
-      Row 1: 
-       - Frame 1: Walk Pose A (Left foot forward)
-       - Frame 2: Walk Pose B (Right foot forward)
-       - Frame 3: Jump Pose (Static, arms up/knees bent)
-       
-      Row 2: 
-       - Frame 4: Special Move Frame 1 (Start of action: ${userPrompt})
-       - Frame 5: Special Move Frame 2
-       - Frame 6: Special Move Frame 3
-       
-      Row 3:
-       - Frame 7: Special Move Frame 4
-       - Frame 8: Special Move Frame 5
-       - Frame 9: Special Move Frame 6 (End)
-       
-      Note: Idle animation is NOT needed (handled via code). Focus on Walk and Special.
-      Ensure clear separation between frames.
-    `;
-
-    try {
-        const cleanBase64 = baseSpriteBase64.replace(/^data:image\/(png|jpeg|jpg);base64,/, '');
-
-        const response = await ai.models.generateContent({
-            model: MODEL_NAME,
-            contents: {
-                parts: [
-                    { text: systemPrompt },
-                    { inlineData: { mimeType: 'image/png', data: cleanBase64 } }
-                ]
-            },
-            config: {
-                imageConfig: {
-                    aspectRatio: "1:1", // Square for a 3x3 grid
-                }
-            }
-        });
-
-        for (const part of response.candidates?.[0]?.content?.parts || []) {
-            if (part.inlineData) {
-                return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-            }
-        }
-        
-        throw new Error("No animation sheet generated.");
-    } catch (error) {
-        console.error("Gemini Animation Error:", error);
-        throw error;
-    }
+export interface AnimationGrid {
+  columns: number;
+  rows: number;
+  aspectRatio: '1:1' | '3:4' | '4:3' | '16:9' | '9:16';
 }
 
-export const generateTileset = async (userPrompt: string): Promise<string> => {
-  if (!apiKey) throw new Error("API Key is missing.");
+/** Pick a compact grid whose cell count exactly matches the requested frames. */
+export function getAnimationGrid(frameCount: number): AnimationGrid {
+  if (!Number.isInteger(frameCount) || frameCount < 1) {
+    throw new Error('Animation frame count must be a positive integer.');
+  }
+  const choices: AnimationGrid['aspectRatio'][] = ['3:4', '1:1', '4:3', '16:9', '9:16'];
+  const ratio = (value: string) => {
+    const [width, height] = value.split(':').map(Number);
+    return width / height;
+  };
+  const layouts = choices.flatMap((aspectRatio) => {
+    const wantedRatio = ratio(aspectRatio);
+    return Array.from({ length: frameCount }, (_, index) => index + 1)
+      .filter((columns) => frameCount % columns === 0)
+      .map((columns) => {
+        const rows = frameCount / columns;
+        const targetRatio = (columns * SPRITE_WIDTH) / (rows * SPRITE_HEIGHT);
+        return {
+          columns,
+          rows,
+          aspectRatio,
+          error: Math.abs(Math.log(wantedRatio / targetRatio)),
+        };
+      });
+  });
+  const best = layouts.reduce((winner, layout) => layout.error < winner.error ? layout : winner);
+  return { columns: best.columns, rows: best.rows, aspectRatio: best.aspectRatio };
+}
+
+/** Generate only the animation the user requested, in row-major frame order. */
+export const generateAnimationFrames = async (
+  baseSpriteBase64: string,
+  animationName: string,
+  animationPrompt: string,
+  frameCount: number,
+  grid: AnimationGrid
+): Promise<string> => {
+  if (!apiKey) throw new Error('API Key is missing.');
 
   const systemPrompt = `
-    Generate a 4x4 Grid Tileset (16 unique tiles total) for a top-down 8-bit RPG game.
-    Theme: ${userPrompt}
-    
-    Each tile is 32x32 pixels. The total image should be square.
-    
-    CONTENTS (Mix of these):
-    - Floor/Ground textures (Grass, Dirt, Stone, Wood)
-    - Walls/Obstacles (Brick, Rock, Tree base, Water)
-    - Decorative items (Flowers, Cracks, Pebbles)
-    
-    STYLE:
-    - 8-bit pixel art.
-    - Flat top-down perspective.
-    - High contrast.
-    
-    BACKGROUND:
-    - SOLID MAGENTA (#FF00FF) for any transparent areas.
-    - Full tile coverage is preferred for ground tiles.
+    You are an expert pixel-art character animator. The attached image is the exact reference character.
+    Create one sprite sheet containing exactly ${frameCount} sequential frames for the "${animationName}" animation.
+    The animation action is: ${animationPrompt}
+
+    Arrange the frames in a ${grid.columns}-column by ${grid.rows}-row grid, reading left to right and then top to bottom.
+    Each cell contains one complete, centered, full-body pose of the same character. Use every cell exactly once.
+    Keep the character's identity, outfit, colors, proportions, outline, and pixel-art style consistent with the reference.
+    Do not add props, weapons, or effects that are not in the reference. Use a solid #FF00FF background.
+    Leave a small gap between cells. Do not add borders, labels, numbers, or extra frames.
   `;
 
-  try {
-      const response = await ai.models.generateContent({
-          model: MODEL_NAME,
-          contents: {
-              parts: [{ text: systemPrompt }]
-          },
-          config: {
-              imageConfig: {
-                  aspectRatio: "1:1"
-              }
-          }
-      });
+  const cleanBase64 = baseSpriteBase64.replace(/^data:image\/(png|jpeg|jpg);base64,/, '');
+  const response = await getAI().models.generateContent({
+    model: MODEL_NAME,
+    contents: {
+      parts: [
+        { text: systemPrompt },
+        { inlineData: { mimeType: 'image/png', data: cleanBase64 } },
+      ],
+    },
+    config: { imageConfig: { aspectRatio: grid.aspectRatio } },
+  });
 
-      for (const part of response.candidates?.[0]?.content?.parts || []) {
-          if (part.inlineData) {
-              return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-          }
-      }
-      
-      throw new Error("No tileset generated.");
-  } catch (error) {
-      console.error("Gemini Tileset Error:", error);
-      throw error;
+  for (const part of response.candidates?.[0]?.content?.parts || []) {
+    if (part.inlineData) return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
   }
+  throw new Error('No animation frames were generated.');
 };
