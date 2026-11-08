@@ -192,7 +192,8 @@ export default {
       if (pathname === '/api/generate/sprite' && request.method === 'POST') return await generate(env, request, 'sprite')
       if (pathname === '/api/generate/animation' && request.method === 'POST') return await generate(env, request, 'animation')
       return json({ error: 'Not found' }, 404)
-    } catch {
+    } catch (err) {
+      console.error(JSON.stringify({ event: 'unhandled', path: pathname, message: err instanceof Error ? err.message : String(err) }))
       return json({ error: 'Service unavailable' }, 503)
     }
   },
