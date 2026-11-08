@@ -18,6 +18,7 @@ export default function Landing({ weeklyLimit = 20 }: { weeklyLimit?: number }) 
     <div className="scanline-bg h-screen overflow-y-auto bg-[#0d0d0d] text-gray-200">
       <main className="mx-auto flex max-w-5xl flex-col gap-20 px-6 py-16 sm:py-24">
         <section className="flex flex-col items-center gap-8 text-center">
+          <img src="/sprite.svg" alt="" width={80} height={80} className="pixelated" />
           <h1 className="retro text-3xl leading-tight text-amber-400 sm:text-5xl">PIXELFORGE</h1>
           <p className="max-w-xl text-sm leading-relaxed text-gray-400 sm:text-base">
             Make a pixel-art game character from a sentence, polish it by hand, and bring it to life with
