@@ -71,6 +71,8 @@ const MAX_MOBILE_SCALE = 16;
 
 const App: React.FC = () => {
   const account = useAccount();
+  const [entered, setEntered] = useState(() => { try { return sessionStorage.getItem('pf_entered') === '1'; } catch { return false; } });
+  const goHome = () => { setEntered(false); try { sessionStorage.removeItem('pf_entered'); } catch { /* optional */ } };
   const isMobile = useIsMobile();
   const [fitScale, setFitScale] = useState(6);
   const [mobileZoom, setMobileZoom] = useState<number | null>(null);
@@ -263,13 +265,15 @@ const App: React.FC = () => {
   if (account.loading) {
     return <div className="flex h-dvh items-center justify-center bg-[#0d0d0d] text-xs text-gray-500 retro">Loading…</div>;
   }
-  if (!account.user) return <Landing />;
+  if (!account.user || !entered) {
+    return <Landing user={account.user} onEnter={() => { setEntered(true); try { sessionStorage.setItem('pf_entered', '1'); } catch { /* optional */ } }} />;
+  }
 
   return (
     <div className="game-root game-layout">
       {crtOverlay && <div className="crt-overlay" aria-hidden />}
       <nav className="z-50 flex h-12 shrink-0 items-center justify-between gap-2 border-b border-gray-800 bg-black px-4 max-md:box-content max-md:px-3 max-md:pt-[env(safe-area-inset-top)]">
-        <span className="flex items-center gap-2"><img src="/sprite.svg" alt="" width={20} height={20} className="pixelated" /><span className="retro text-xs font-bold tracking-wide text-amber-400 max-[360px]:hidden">PIXELFORGE</span></span>
+        <button type="button" onClick={goHome} aria-label="PixelForge home" className="flex items-center gap-2"><img src="/sprite.svg" alt="" width={20} height={20} className="pixelated" /><span className="retro text-xs font-bold tracking-wide text-amber-400 max-[360px]:hidden">PIXELFORGE</span></button>
         <div className="flex items-center gap-2 max-md:hidden" aria-label="Creation steps">
           {STEPS.map((step) => (
             <button
@@ -294,6 +298,7 @@ const App: React.FC = () => {
 
       {phase === AppPhase.CREATE ? (
         <CharacterCreateView
+          userName={account.user?.name}
           characterName={characterName}
           onNameChange={setCharacterName}
           description={prompt}
