@@ -12,12 +12,16 @@ View your app in AI Studio: https://ai.studio/apps/drive/1udfLhn1BGyXFggS_M_yuIL
 
 ## Run locally
 
-**Prerequisites:** Node.js
+Generation goes through a Cloudflare Worker (`worker/`) that holds the Gemini key,
+requires an AKS account (OIDC via AKS-Access) and enforces a weekly generation
+quota through the `ACCESS` service binding (`reservePixelForge` / `finishPixelForge`).
+The Gemini key never reaches the browser.
 
-1. Install dependencies: `npm install`
-2. Add `GEMINI_API_KEY` to `.env.local` to enable AI sprite and animation generation.
-   Preset characters, editing, and GIF export can be used without an API key.
-3. Start the dev server: `npm run dev`
+1. `bun install`
+2. Copy `.dev.vars.example` to `.dev.vars` and set `GEMINI_API_KEY`, a random `SESSION_SECRET` (32+ chars) and `OIDC_CLIENT_SECRET`.
+3. `bun run build && bun run cf:dev` (API on :8788), then `bun run dev` (UI on http://127.0.0.1:5173, proxies `/api`).
+   Open the UI at 127.0.0.1:5173 (the registered redirect URI); AKS-Access must be reachable for sign-in.
+4. Deploy: `wrangler secret put` the three secrets, then `bun run deploy`.
 
 The workflow is **Create → Edit → Animate**. Animation clips have their own
 name, motion prompt, frame count, playback FPS, and loop setting.

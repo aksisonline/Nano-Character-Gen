@@ -11,6 +11,8 @@ import {
   SPRITE_WIDTH,
 } from './constants';
 import { getAnimationGrid, generateAnimationFrames } from './services/geminiService';
+import { AccountChip, useAccount } from './components/AccountBar';
+import Landing from './components/Landing';
 import { isMagentaLikeHex, processAnimationSheet } from './services/imageProcessingService';
 import { runSpritePipeline } from './services/spritePipeline';
 import { downloadSpriteGif } from './lib/gifExport';
@@ -57,6 +59,7 @@ function pixelsToPng(pixels: number[], palette: (string | null)[]): string {
 }
 
 const App: React.FC = () => {
+  const account = useAccount();
   const [phase, setPhase] = useState<AppPhase>(AppPhase.CREATE);
   const [matrix, setMatrix] = useState<SpriteMatrix>(emptyMatrix);
   const [characterName, setCharacterName] = useState('');
@@ -79,8 +82,12 @@ const App: React.FC = () => {
       setError('Add a character description before generating.');
       return;
     }
-    if (!process.env.API_KEY) {
-      setError('Missing API key. Add GEMINI_API_KEY to your environment.');
+    if (!account.user) {
+      setError('Sign in with your AKS account to generate.');
+      return;
+    }
+    if (account.usage && account.usage.remaining <= 0) {
+      setError(`Weekly generation limit reached. Resets ${new Date(account.usage.resetsAt).toLocaleString()}.`);
       return;
     }
     if (matrix.animations.length && !window.confirm('Generating a new base sprite will discard the current animation clips. Continue?')) {
@@ -106,7 +113,7 @@ const App: React.FC = () => {
     } finally {
       setIsGenerating(false);
     }
-  }, [characterName, matrix.animations.length, prompt]);
+  }, [account.user, account.usage, characterName, matrix.animations.length, prompt]);
 
   const handleSelectTemplate = useCallback((template: SpriteMatrix) => {
     const copy = {
@@ -173,8 +180,12 @@ const App: React.FC = () => {
   const handleGenerateAnimation = useCallback(async (id: string) => {
     const animation = matrix.animations.find((item) => item.id === id);
     if (!animation) return;
-    if (!process.env.API_KEY) {
-      setError('Missing API key. Add GEMINI_API_KEY to your environment.');
+    if (!account.user) {
+      setError('Sign in with your AKS account to generate.');
+      return;
+    }
+    if (account.usage && account.usage.remaining <= 0) {
+      setError(`Weekly generation limit reached. Resets ${new Date(account.usage.resetsAt).toLocaleString()}.`);
       return;
     }
     setGeneratingAnimationId(id);
@@ -203,7 +214,7 @@ const App: React.FC = () => {
     } finally {
       setGeneratingAnimationId(null);
     }
-  }, [handleUpdateAnimation, matrix]);
+  }, [account.user, account.usage, handleUpdateAnimation, matrix]);
 
   const handleExportAnimation = useCallback((id: string, exportScale: number) => {
     const animation = matrix.animations.find((item) => item.id === id);
@@ -224,6 +235,11 @@ const App: React.FC = () => {
     setError(null);
     setPhase(next);
   };
+
+  if (account.loading) {
+    return <div className="flex h-screen items-center justify-center bg-[#0d0d0d] text-xs text-gray-500 retro">Loading…</div>;
+  }
+  if (!account.user) return <Landing />;
 
   return (
     <div className="game-root game-layout">
@@ -250,7 +266,10 @@ const App: React.FC = () => {
             </button>
           ))}
         </div>
-        <span className="hidden max-w-40 truncate text-[10px] text-gray-500 sm:block">{hasSprite ? matrix.meta.name : 'New character'}</span>
+        <div className="flex items-center gap-3">
+          <span className="hidden max-w-32 truncate text-[10px] text-gray-500 lg:block">{hasSprite ? matrix.meta.name : 'New character'}</span>
+          <AccountChip account={account} />
+        </div>
       </nav>
 
       {phase === AppPhase.CREATE ? (
