@@ -245,7 +245,7 @@ const App: React.FC = () => {
     <div className="game-root game-layout">
       {crtOverlay && <div className="crt-overlay" aria-hidden />}
       <nav className="z-50 flex h-12 shrink-0 items-center justify-between border-b border-gray-800 bg-black px-4">
-        <span className="retro text-xs font-bold tracking-wide text-amber-400">PIXELFORGE</span>
+        <span className="flex items-center gap-2"><img src="/sprite.svg" alt="" width={20} height={20} className="pixelated" /><span className="retro text-xs font-bold tracking-wide text-amber-400">PIXELFORGE</span></span>
         <div className="flex items-center gap-2" aria-label="Creation steps">
           {[
             { phase: AppPhase.CREATE, label: '1 · CREATE' },
