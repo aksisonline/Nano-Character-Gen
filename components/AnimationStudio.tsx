@@ -20,7 +20,7 @@ interface AnimationStudioProps {
 }
 
 const fieldClass = 'w-full rounded-none border border-amber-900/60 bg-[#0d0d0d] px-2 py-2 text-xs text-gray-200 retro game-focus-pixel';
-const buttonClass = 'game-button game-interactive rounded border border-amber-900/60 px-3 py-2 text-[10px] font-bold text-amber-300 hover:bg-amber-950/40 disabled:cursor-not-allowed disabled:opacity-50';
+const buttonClass = 'game-button max-md:min-h-12 game-interactive rounded border border-amber-900/60 px-3 py-2 text-[10px] font-bold text-amber-300 hover:bg-amber-950/40 disabled:cursor-not-allowed disabled:opacity-50';
 
 const AnimationStudio: React.FC<AnimationStudioProps> = ({
   animations,
@@ -60,9 +60,9 @@ const AnimationStudio: React.FC<AnimationStudioProps> = ({
   };
 
   return (
-    <div className="flex flex-1 min-h-0 overflow-hidden bg-[#0d0d0d] text-gray-200">
-      <aside className="flex w-80 shrink-0 flex-col gap-4 overflow-y-auto border-r-4 border-amber-900/70 bg-[#141414] p-4">
-        <section>
+    <div className="game-scroll flex flex-1 min-h-0 overflow-hidden bg-[#0d0d0d] text-gray-200 max-md:flex-col max-md:overflow-y-auto">
+      <aside className="flex w-80 shrink-0 flex-col gap-4 overflow-y-auto border-r-4 border-amber-900/70 bg-[#141414] p-4 max-md:contents">
+        <section className="max-md:order-1 max-md:border-b-4 max-md:border-amber-900/70 max-md:bg-[#141414] max-md:p-4">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="retro text-sm font-bold text-amber-300">Animations</h2>
             <span className="text-[10px] text-gray-500">{animations.length} defined</span>
@@ -78,7 +78,7 @@ const AnimationStudio: React.FC<AnimationStudioProps> = ({
                   {animation.status === 'generating' && <span className="text-[10px] text-amber-400">Generating…</span>}
                   {animation.status === 'error' && <span className="text-[10px] text-red-400">Generation failed</span>}
                 </button>
-                <button type="button" className="p-1 text-gray-500 hover:text-red-400" onClick={() => onDelete(animation.id)} aria-label={`Delete ${animation.name}`}>
+                <button type="button" className="flex items-center justify-center p-1 text-gray-500 hover:text-red-400" onClick={() => onDelete(animation.id)} aria-label={`Delete ${animation.name}`}>
                   <Trash2 size={14} />
                 </button>
               </div>
@@ -87,7 +87,7 @@ const AnimationStudio: React.FC<AnimationStudioProps> = ({
           </div>
         </section>
 
-        <form onSubmit={addAnimation} className="flex flex-col gap-3 border-t border-gray-800 pt-4">
+        <form onSubmit={addAnimation} className="flex flex-col gap-3 border-t border-gray-800 pt-4 max-md:order-3 max-md:border-t-4 max-md:border-amber-900/70 max-md:bg-[#141414] max-md:p-4">
           <h3 className="retro text-xs font-bold text-gray-300">Define an animation</h3>
           <label className="grid gap-1 text-[10px] text-gray-400">
             Name
@@ -135,7 +135,7 @@ const AnimationStudio: React.FC<AnimationStudioProps> = ({
           </div>
         </form>
 
-        <section className="mt-auto border-t border-gray-800 pt-4">
+        <section className="mt-auto border-t border-gray-800 pt-4 max-md:order-4 max-md:border-t-4 max-md:border-amber-900/70 max-md:bg-[#141414] max-md:p-4">
           <label className="mb-3 grid gap-1 text-[10px] text-gray-400">
             GIF scale
             <select className={fieldClass} value={gifScale} onChange={(event) => setGifScale(Number(event.target.value))}>
@@ -148,7 +148,7 @@ const AnimationStudio: React.FC<AnimationStudioProps> = ({
         </section>
       </aside>
 
-      <main className="flex min-w-0 flex-1 flex-col items-center justify-center gap-6 overflow-auto p-6">
+      <main className="flex min-w-0 flex-1 flex-col items-center justify-center gap-6 overflow-auto p-6 max-md:order-2 max-md:flex-none max-md:overflow-visible max-md:p-4">
         {error && <div role="alert" className="w-full max-w-2xl rounded border border-red-900/70 bg-red-950/40 px-3 py-2 text-xs text-red-300">{error}</div>}
         {selectedAnimation ? (
           <>
@@ -189,12 +189,12 @@ const AnimationStudio: React.FC<AnimationStudioProps> = ({
                     </label>
                   </div>
                 </div>
-                <div className="flex gap-2">
-                  <button type="button" className={`${buttonClass} flex items-center gap-2`} onClick={() => onGenerate(selectedAnimation.id)} disabled={isGenerating || !selectedAnimation.name.trim() || !selectedAnimation.prompt.trim()}>
+                <div className="flex w-full gap-2 max-md:flex-col md:w-auto">
+                  <button type="button" className={`${buttonClass} flex items-center justify-center gap-2`} onClick={() => onGenerate(selectedAnimation.id)} disabled={isGenerating || !selectedAnimation.name.trim() || !selectedAnimation.prompt.trim()}>
                     {isGenerating ? <RefreshCw size={13} className="animate-spin" /> : <Wand2 size={13} />}
                     {selectedAnimation.frames.length ? 'Regenerate' : 'Generate frames'}
                   </button>
-                  <button type="button" className={`${buttonClass} flex items-center gap-2`} onClick={() => onExport(selectedAnimation.id, gifScale)} disabled={!selectedAnimation.frames.length}>
+                  <button type="button" className={`${buttonClass} flex items-center justify-center gap-2`} onClick={() => onExport(selectedAnimation.id, gifScale)} disabled={!selectedAnimation.frames.length}>
                     <Download size={13} /> Export GIF
                   </button>
                 </div>
