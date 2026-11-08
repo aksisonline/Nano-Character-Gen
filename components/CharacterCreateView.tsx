@@ -1,6 +1,6 @@
 import React from 'react';
 import { SpriteMatrix, ToolMode } from '../types';
-import { GRID_UNIT } from '../constants';
+import { useIsMobile } from '../hooks/useIsMobile';
 import SpriteCanvas from './SpriteCanvas';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/8bit/card';
 import { Button } from '@/components/ui/8bit/button';
@@ -35,16 +35,17 @@ const CharacterCreateView: React.FC<CharacterCreateViewProps> = ({
   onEditSprite,
   onSelectTemplate,
 }) => {
+  const isMobile = useIsMobile();
   const hasSprite =
     matrix.pixels.some((p) => p !== 0) ||
     (matrix.meta?.name && matrix.meta.name !== 'init');
   const isEmpty = !hasSprite && !isGenerating;
 
   return (
-    <div className="game-layout-row bg-[#0d0d0d] text-gray-200 flex-1 min-h-0">
+    <div className="game-layout-row game-scroll bg-[#0d0d0d] text-gray-200 flex-1 min-h-0 max-md:flex-col max-md:overflow-y-auto">
       {/* Center: preview */}
-      <main className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-        <div className="game-center flex-1 min-h-0 relative" style={{ padding: GRID_UNIT * 6 }}>
+      <main className={`flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden max-md:order-2 max-md:flex-none ${isEmpty ? 'max-md:hidden' : ''}`}>
+        <div className="game-center flex-1 min-h-0 relative p-4 md:p-12">
           {isEmpty && (
             <p className="text-sm text-gray-600 absolute inset-0 flex items-center justify-center pointer-events-none retro">
               Add a name and description, or start from a template
@@ -59,7 +60,7 @@ const CharacterCreateView: React.FC<CharacterCreateViewProps> = ({
             <div className="sprite-glow sprite-shadow pixelated game-snap">
               <SpriteCanvas
                 matrix={matrix}
-                scale={scale}
+                scale={isMobile ? 6 : scale}
                 selectedColorIndex={0}
                 toolMode={ToolMode.PENCIL}
                 onUpdatePixel={() => {}}
@@ -75,8 +76,7 @@ const CharacterCreateView: React.FC<CharacterCreateViewProps> = ({
 
       {/* Right: 8bitcn panel */}
       <aside
-        className="shrink-0 border-l border-foreground/20 flex flex-col p-4"
-        style={{ width: GRID_UNIT * 40, padding: GRID_UNIT * 3 }}
+        className="shrink-0 border-l border-foreground/20 flex flex-col p-4 max-md:order-1 max-md:w-full max-md:border-l-0 max-md:p-3 md:w-80 md:p-6"
       >
         <Card className="w-full">
           <CardHeader className="pb-2">
@@ -122,7 +122,7 @@ const CharacterCreateView: React.FC<CharacterCreateViewProps> = ({
           </CardContent>
         </Card>
 
-        <div className="mt-4">
+        <div className="mt-4 max-md:mb-4">
           <BaseCharacterSelect onSelect={onSelectTemplate} />
         </div>
 

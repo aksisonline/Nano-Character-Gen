@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Grid3X3, Layers, ZoomIn, ZoomOut } from 'lucide-react';
+import { Grid3X3, Layers, Maximize, Paintbrush, Film, Sparkles, ZoomIn, ZoomOut } from 'lucide-react';
 import { AppPhase, SpriteAnimation, SpriteMatrix, ToolMode } from './types';
 import {
   DEFAULT_PREVIEW_SCALE,
@@ -21,6 +21,9 @@ import CharacterCreateView from './components/CharacterCreateView';
 import CharacterPanel from './components/CharacterPanel';
 import PalettePanel from './components/PalettePanel';
 import PixelEasel from './components/PixelEasel';
+import CanvasViewport from './components/CanvasViewport';
+import { MobileEditorDock, MobileEditorSheet } from './components/MobileEditorDock';
+import { useIsMobile } from './hooks/useIsMobile';
 import { Button } from '@/components/ui/8bit/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/8bit/card';
 
@@ -58,8 +61,20 @@ function pixelsToPng(pixels: number[], palette: (string | null)[]): string {
   return canvas.toDataURL('image/png');
 }
 
+const STEPS = [
+  { phase: AppPhase.CREATE, label: '1 · CREATE', short: 'Create', icon: Sparkles },
+  { phase: AppPhase.EDITOR, label: '2 · EDIT', short: 'Edit', icon: Paintbrush },
+  { phase: AppPhase.ANIMATOR, label: '3 · ANIMATE', short: 'Animate', icon: Film },
+];
+
+const MAX_MOBILE_SCALE = 16;
+
 const App: React.FC = () => {
   const account = useAccount();
+  const isMobile = useIsMobile();
+  const [fitScale, setFitScale] = useState(6);
+  const [mobileZoom, setMobileZoom] = useState<number | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [phase, setPhase] = useState<AppPhase>(AppPhase.CREATE);
   const [matrix, setMatrix] = useState<SpriteMatrix>(emptyMatrix);
   const [characterName, setCharacterName] = useState('');
@@ -74,6 +89,15 @@ const App: React.FC = () => {
   const [showGrid, setShowGrid] = useState(true);
   const [showJson, setShowJson] = useState(false);
   const [crtOverlay, setCrtOverlay] = useState(false);
+
+  const mobileScale = mobileZoom ?? fitScale;
+  const zoomBy = useCallback((delta: 1 | -1) => {
+    if (!isMobile) {
+      setScale((value) => nextScale(value, delta));
+      return;
+    }
+    setMobileZoom((current) => Math.max(2, Math.min(MAX_MOBILE_SCALE, (current ?? fitScale) + delta)));
+  }, [fitScale, isMobile]);
 
   const hasSprite = matrix.meta.name !== 'init' || matrix.pixels.some((pixel) => pixel !== 0);
   const handleGenerateBase = useCallback(async () => {
@@ -237,21 +261,17 @@ const App: React.FC = () => {
   };
 
   if (account.loading) {
-    return <div className="flex h-screen items-center justify-center bg-[#0d0d0d] text-xs text-gray-500 retro">Loading…</div>;
+    return <div className="flex h-dvh items-center justify-center bg-[#0d0d0d] text-xs text-gray-500 retro">Loading…</div>;
   }
   if (!account.user) return <Landing />;
 
   return (
     <div className="game-root game-layout">
       {crtOverlay && <div className="crt-overlay" aria-hidden />}
-      <nav className="z-50 flex h-12 shrink-0 items-center justify-between border-b border-gray-800 bg-black px-4">
-        <span className="flex items-center gap-2"><img src="/sprite.svg" alt="" width={20} height={20} className="pixelated" /><span className="retro text-xs font-bold tracking-wide text-amber-400">PIXELFORGE</span></span>
-        <div className="flex items-center gap-2" aria-label="Creation steps">
-          {[
-            { phase: AppPhase.CREATE, label: '1 · CREATE' },
-            { phase: AppPhase.EDITOR, label: '2 · EDIT' },
-            { phase: AppPhase.ANIMATOR, label: '3 · ANIMATE' },
-          ].map((step) => (
+      <nav className="z-50 flex h-12 shrink-0 items-center justify-between gap-2 border-b border-gray-800 bg-black px-4 max-md:box-content max-md:px-3 max-md:pt-[env(safe-area-inset-top)]">
+        <span className="flex items-center gap-2"><img src="/sprite.svg" alt="" width={20} height={20} className="pixelated" /><span className="retro text-xs font-bold tracking-wide text-amber-400 max-[360px]:hidden">PIXELFORGE</span></span>
+        <div className="flex items-center gap-2 max-md:hidden" aria-label="Creation steps">
+          {STEPS.map((step) => (
             <button
               key={step.phase}
               type="button"
@@ -287,8 +307,8 @@ const App: React.FC = () => {
           onSelectTemplate={handleSelectTemplate}
         />
       ) : phase === AppPhase.EDITOR ? (
-        <div className="game-layout-row bg-[#0d0d0d] text-gray-200 scanline-bg">
-          <CharacterPanel
+        <div className="game-layout-row bg-[#0d0d0d] text-gray-200 scanline-bg max-md:flex-col">
+          {!isMobile && <CharacterPanel
             prompt={prompt}
             onPromptChange={setPrompt}
             isGenerating={isGenerating}
@@ -301,32 +321,55 @@ const App: React.FC = () => {
             showJson={showJson}
             onToggleJson={() => setShowJson((value) => !value)}
             onBackToCreate={() => changePhase(AppPhase.CREATE)}
-          />
+          />}
 
           <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-            <div className="flex h-12 shrink-0 items-center justify-between border-b-4 border-amber-900/60 bg-[#141414]/95 px-4">
+            <div className="flex h-12 shrink-0 items-center justify-between border-b-4 border-amber-900/60 bg-[#141414]/95 px-4 max-md:h-14 max-md:px-2">
               <div className="flex items-center gap-2">
-                <span className="mr-2 text-xs text-gray-500">{SPRITE_WIDTH}×{SPRITE_HEIGHT}</span>
-                <Button variant="ghost" size="icon" className="size-8 game-button game-interactive" onClick={() => setScale((value) => nextScale(value, -1))} aria-label="Zoom out">
+                <span className="mr-2 text-xs text-gray-500 max-md:hidden">{SPRITE_WIDTH}×{SPRITE_HEIGHT}</span>
+                <Button variant="ghost" size="icon" className="size-8 game-button game-interactive max-md:size-11" onClick={() => zoomBy(-1)} aria-label="Zoom out">
                   <ZoomOut size={14} />
                 </Button>
-                <span className="w-10 text-center text-[10px] text-gray-400">{scale}×</span>
-                <Button variant="ghost" size="icon" className="size-8 game-button game-interactive" onClick={() => setScale((value) => nextScale(value, 1))} aria-label="Zoom in">
+                <span className="w-10 text-center text-[10px] text-gray-400">{isMobile ? mobileScale : scale}×</span>
+                <Button variant="ghost" size="icon" className="size-8 game-button game-interactive max-md:size-11" onClick={() => zoomBy(1)} aria-label="Zoom in">
                   <ZoomIn size={14} />
                 </Button>
-                <Button variant={showGrid ? 'secondary' : 'ghost'} size="icon" className="size-8 game-button game-interactive" onClick={() => setShowGrid((value) => !value)} title="Toggle grid" aria-label="Toggle grid">
+                <Button variant="ghost" size="icon" className="game-button game-interactive size-11 md:hidden" onClick={() => setMobileZoom(null)} aria-label="Fit to screen" disabled={mobileZoom === null}>
+                  <Maximize size={16} />
+                </Button>
+                <Button variant={showGrid ? 'secondary' : 'ghost'} size="icon" className="size-8 game-button game-interactive max-md:size-11" onClick={() => setShowGrid((value) => !value)} title="Toggle grid" aria-label="Toggle grid">
                   <Grid3X3 size={14} />
                 </Button>
               </div>
               <div className="flex items-center gap-3">
-                <span className="text-[10px] text-gray-500">Editing base sprite</span>
-                <Layers size={12} className="text-gray-500" />
-                <button type="button" className={`game-button game-interactive rounded px-2 py-1 text-[10px] ${crtOverlay ? 'bg-amber-900/50 text-amber-300' : 'text-gray-500 hover:text-gray-300'}`} onClick={() => setCrtOverlay((value) => !value)} aria-pressed={crtOverlay}>
+                <span className="text-[10px] text-gray-500 max-md:hidden">Editing base sprite</span>
+                <Layers size={12} className="text-gray-500 max-md:hidden" />
+                <button type="button" className={`game-button game-interactive rounded px-2 py-1 text-[10px] max-md:px-3 ${crtOverlay ? 'bg-amber-900/50 text-amber-300' : 'text-gray-500 hover:text-gray-300'}`} onClick={() => setCrtOverlay((value) => !value)} aria-pressed={crtOverlay}>
                   CRT
                 </button>
               </div>
             </div>
-            <div className="game-center relative flex-1 min-h-0 p-8" style={{ padding: GRID_UNIT * 4 }}>
+            <div className={`game-center relative flex-1 min-h-0 p-8 ${isMobile ? '!p-0' : ''}`} style={isMobile ? undefined : { padding: GRID_UNIT * 4 }}>
+              {isMobile ? (
+                <CanvasViewport
+                  onFitChange={setFitScale}
+                  onPinchStep={zoomBy}
+                >
+                  <PixelEasel
+                    compact
+                    matrix={matrix}
+                    scale={mobileScale}
+                    selectedColorIndex={selectedColorIndex}
+                    toolMode={toolMode}
+                    onUpdatePixel={handleUpdatePixel}
+                    onPickColor={(index) => {
+                      setSelectedColorIndex(index);
+                      setToolMode(ToolMode.PENCIL);
+                    }}
+                    showGrid={showGrid}
+                  />
+                </CanvasViewport>
+              ) : (
               <PixelEasel
                 matrix={matrix}
                 scale={scale}
@@ -339,9 +382,10 @@ const App: React.FC = () => {
                 }}
                 showGrid={showGrid}
               />
+              )}
               {showJson && (
-                <div className="absolute inset-0 z-30 flex items-center justify-center bg-[#0d0d0d]/95 p-8">
-                  <Card className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden border-amber-900/50 bg-[#1a1a1a]">
+                <div className="absolute inset-0 z-30 flex items-center justify-center bg-[#0d0d0d]/95 p-4 md:p-8">
+                  <Card className="flex max-h-[80%] w-full max-w-2xl flex-col overflow-hidden border-amber-900/50 bg-[#1a1a1a]">
                     <CardHeader className="flex flex-row items-center justify-between border-b-2 border-amber-900/50 px-4 py-2">
                       <CardTitle className="retro text-sm">Character JSON</CardTitle>
                       <Button variant="ghost" size="sm" className="game-button game-interactive" onClick={() => setShowJson(false)}>Close</Button>
@@ -355,6 +399,21 @@ const App: React.FC = () => {
             </div>
           </main>
 
+          {isMobile ? (
+            <MobileEditorDock
+              toolMode={toolMode}
+              onToolModeChange={setToolMode}
+              palette={matrix.palette}
+              selectedIndex={selectedColorIndex}
+              onSelect={(index) => {
+                setSelectedColorIndex(index);
+                if (toolMode === ToolMode.ERASER) setToolMode(ToolMode.PENCIL);
+              }}
+              onUpdateColor={handleUpdatePaletteColor}
+              onAddColor={handleAddColor}
+              onOpenMore={() => setSheetOpen(true)}
+            />
+          ) : (
           <PalettePanel
             palette={matrix.palette}
             selectedIndex={selectedColorIndex}
@@ -364,6 +423,21 @@ const App: React.FC = () => {
             }}
             onUpdateColor={handleUpdatePaletteColor}
             onAddColor={handleAddColor}
+          />
+          )}
+          <MobileEditorSheet
+            open={isMobile && sheetOpen}
+            onClose={() => setSheetOpen(false)}
+            prompt={prompt}
+            onPromptChange={setPrompt}
+            isGenerating={isGenerating}
+            error={error}
+            onGenerate={handleGenerateBase}
+            onConfirmAndAnimate={() => changePhase(AppPhase.ANIMATOR)}
+            onDownloadPng={handleDownloadPng}
+            showJson={showJson}
+            onToggleJson={() => setShowJson((value) => !value)}
+            onBackToCreate={() => changePhase(AppPhase.CREATE)}
           />
         </div>
       ) : (
@@ -382,6 +456,35 @@ const App: React.FC = () => {
           error={error}
         />
       )}
+
+      <div
+        role="tablist"
+        aria-label="Creation steps"
+        className="z-50 flex shrink-0 border-t-4 border-amber-900/80 bg-black md:hidden"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+      >
+        {STEPS.map((step) => {
+          const disabled = step.phase !== AppPhase.CREATE && !hasSprite;
+          const active = phase === step.phase;
+          return (
+            <button
+              key={step.phase}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              aria-current={active ? 'step' : undefined}
+              disabled={disabled}
+              onClick={() => changePhase(step.phase)}
+              className={`game-button game-interactive retro flex h-14 flex-1 flex-col items-center justify-center gap-1 text-[10px] ${
+                active ? 'bg-amber-700 text-white' : 'text-gray-400 disabled:opacity-30'
+              }`}
+            >
+              <step.icon size={18} />
+              {step.short.toUpperCase()}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 };

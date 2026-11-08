@@ -3,22 +3,14 @@ import { SpriteMatrix, ToolMode } from '../types';
 import {
   SPRITE_WIDTH,
   SPRITE_HEIGHT,
-  PREVIEW_SCALES,
-  DEFAULT_PREVIEW_SCALE,
   CHECKER_LIGHT,
   CHECKER_DARK,
 } from '../constants';
 import { isMagentaLikeHex } from '../services/imageProcessingService';
 
-function clampScale(scale: number, readOnly?: boolean): number {
-  if (readOnly && scale <= 1) return 1;
-  const allowed = [...PREVIEW_SCALES];
-  let best = allowed[0];
-  for (const s of allowed) {
-    if (s >= scale) return s;
-    best = s;
-  }
-  return best;
+function clampScale(scale: number, _readOnly?: boolean): number {
+  // Integer scales only, so every sprite pixel maps to a whole number of screen pixels.
+  return Math.max(1, Math.round(scale));
 }
 
 interface SpriteCanvasProps {
@@ -51,6 +43,8 @@ const SpriteCanvas: React.FC<SpriteCanvasProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  // Active pointers: a second finger means pan/pinch, never draw.
+  const pointersRef = useRef<Set<number>>(new Set());
   const scale = clampScale(scaleProp, readOnly);
   const width = SPRITE_WIDTH * scale;
   const height = SPRITE_HEIGHT * scale;
@@ -111,17 +105,24 @@ const SpriteCanvas: React.FC<SpriteCanvasProps> = ({
   const handlePointerDown = (e: React.PointerEvent) => {
     if (readOnly) return;
     e.preventDefault();
+    pointersRef.current.add(e.pointerId);
+    if (pointersRef.current.size > 1) {
+      setIsDrawing(false);
+      return;
+    }
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
     setIsDrawing(toolMode !== ToolMode.PICKER);
     handleDraw(e);
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (readOnly || !isDrawing) return;
+    if (readOnly || !isDrawing || pointersRef.current.size > 1) return;
     handleDraw(e);
   };
 
-  const handlePointerUp = useCallback(() => {
-    setIsDrawing(false);
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    pointersRef.current.delete(e.pointerId);
+    if (pointersRef.current.size === 0) setIsDrawing(false);
   }, []);
 
   const handleDraw = (e: React.PointerEvent) => {
@@ -171,7 +172,7 @@ const SpriteCanvas: React.FC<SpriteCanvasProps> = ({
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      onPointerLeave={handlePointerUp}
+      onPointerCancel={handlePointerUp}
     />
   );
 };

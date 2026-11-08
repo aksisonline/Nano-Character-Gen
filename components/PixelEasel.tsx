@@ -11,9 +11,14 @@ interface PixelEaselProps {
   onUpdatePixel: (index: number, colorIndex: number) => void;
   onPickColor?: (colorIndex: number) => void;
   showGrid: boolean;
+  /** Phone layout: canvas only, no 1× reference. */
+  compact?: boolean;
 }
 
-const PixelEasel: React.FC<PixelEaselProps> = (props) => {
+const PixelEasel: React.FC<PixelEaselProps> = ({ compact, ...props }) => {
+  if (compact) {
+    return <SpriteCanvas {...props} glow shadow />;
+  }
   return (
     <div className="flex items-start gap-4 game-snap" style={{ gap: GRID_UNIT * 2 }}>
       <SpriteCanvas

@@ -11,7 +11,7 @@ interface PalettePanelProps {
   onAddColor: () => void;
 }
 
-const CHECKER_SVG =
+export const CHECKER_SVG =
   "url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPjxyZWN0IHdpZHRoPSI4IiBoZWlnaHQ9IjgiIGZpbGw9IiMxYTIwMmMiLz48cGF0aCBkPSJNMCAwSDRWMHoiIGZpbGw9IiMyZDM3NDgiLz48cGF0aCBkPSJNNCA0SDhWOHoiIGZpbGw9IiMyZDM3NDgiLz48L3N2Zz4=')";
 
 const PalettePanel: React.FC<PalettePanelProps> = ({
