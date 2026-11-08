@@ -12,7 +12,14 @@ const STEPS = [
 
 export const signIn = () => { window.location.href = '/api/auth/login'; };
 
-export default function Landing({ weeklyLimit = 20 }: { weeklyLimit?: number }) {
+interface LandingProps {
+  weeklyLimit?: number;
+  /** Signed-in account; when present the CTA greets the user and opens the studio. */
+  user?: { name: string | null } | null;
+  onEnter?: () => void;
+}
+
+export default function Landing({ weeklyLimit = 20, user, onEnter }: LandingProps) {
   const failed = new URLSearchParams(window.location.search).get('signin') === 'failed';
   const isMobile = useIsMobile();
   const showcase = BASE_CHARACTERS.slice(0, 3);
@@ -35,10 +42,15 @@ export default function Landing({ weeklyLimit = 20 }: { weeklyLimit?: number }) 
             ))}
           </div>
           <div className="flex w-full flex-col items-center gap-3">
-            <Button onClick={signIn} className="retro game-button h-12 w-full max-w-xs px-8 py-3 text-xs sm:w-auto">Sign in to start</Button>
+            <Button
+              onClick={user ? onEnter : signIn}
+              className="retro game-button h-12 w-full max-w-xs px-8 py-3 text-xs sm:w-auto"
+            >
+              {user ? `Hello ${user.name?.trim() || 'there'}` : 'Sign in to start'}
+            </Button>
             {failed && <p role="alert" className="text-xs text-red-400">Sign-in didn't complete. Please try again.</p>}
             <p className="text-xs text-gray-500">
-              Uses your AKS account. Includes {weeklyLimit} AI generations every week.
+              {user ? 'Tap to open the studio.' : 'Uses your AKS account.'} Includes {weeklyLimit} AI generations every week.
             </p>
           </div>
         </section>
