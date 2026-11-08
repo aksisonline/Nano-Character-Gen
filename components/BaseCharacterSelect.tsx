@@ -18,13 +18,13 @@ const BaseCharacterSelect: React.FC<BaseCharacterSelectProps> = ({ onSelect }) =
           <UserIcon size={12} /> Base characters
         </CardTitle>
       </CardHeader>
-      <CardContent className="px-3 pb-3 flex gap-2" style={{ gap: GRID_UNIT }}>
+      <CardContent className="px-3 pb-3 flex flex-wrap gap-2" style={{ gap: GRID_UNIT }}>
         {BASE_CHARACTERS.map((base) => (
           <Button
             key={base.id}
             variant="outline"
             size="sm"
-            className="flex-1 retro text-[10px] py-1 game-button game-interactive game-focus-pixel"
+            className="flex-1 min-w-[4.5rem] retro text-[10px] py-1 game-button game-interactive game-focus-pixel"
             onClick={() => onSelect(base.matrix)}
           >
             {base.name}

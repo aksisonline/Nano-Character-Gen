@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pixelforge",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-02",
+  "workers_dev": false,
+  "routes": [{ "pattern": "pixelforge.aksisonline.com", "custom_domain": true }],
+  "preview_urls": false,
+  "assets": { "directory": "./dist", "binding": "ASSETS", "not_found_handling": "single-page-application", "run_worker_first": ["/api/*"] },
+  "vars": { "OIDC_ISSUER": "https://auth.aksisonline.com/api/auth", "OIDC_CLIENT_ID": "pixelforge", "MODEL_NAME": "gemini-2.5-flash-image" },
+  "services": [{ "binding": "ACCESS", "service": "aks-access-backend", "entrypoint": "AccessService" }]
+}
