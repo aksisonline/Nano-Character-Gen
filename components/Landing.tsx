@@ -12,6 +12,7 @@ const STEPS = [
 export const signIn = () => { window.location.href = '/api/auth/login'; };
 
 export default function Landing({ weeklyLimit = 20 }: { weeklyLimit?: number }) {
+  const failed = new URLSearchParams(window.location.search).get('signin') === 'failed';
   const showcase = BASE_CHARACTERS.slice(0, 3);
   return (
     <div className="scanline-bg h-screen overflow-y-auto bg-[#0d0d0d] text-gray-200">
@@ -32,6 +33,7 @@ export default function Landing({ weeklyLimit = 20 }: { weeklyLimit?: number }) 
           </div>
           <div className="flex flex-col items-center gap-3">
             <Button onClick={signIn} className="retro game-button px-8 py-3 text-xs">Sign in to start</Button>
+            {failed && <p role="alert" className="text-xs text-red-400">Sign-in didn't complete. Please try again.</p>}
             <p className="text-[11px] text-gray-500">
               Uses your AKS account. Includes {weeklyLimit} AI generations every week.
             </p>

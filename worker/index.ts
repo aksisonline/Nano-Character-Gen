@@ -79,29 +79,34 @@ async function login(env: Env, request: Request) {
   return new Response(null, { status: 302, headers: { Location: auth.toString(), 'Set-Cookie': cookie(request, FLOW_COOKIE, flow, 600), 'Cache-Control': 'no-store' } })
 }
 
+// Send the browser back to the app with a flag instead of leaving it on a raw JSON error.
+function signInFailed(request: Request) {
+  return new Response(null, { status: 302, headers: { Location: new URL('/?signin=failed', request.url).toString(), 'Cache-Control': 'no-store' } })
+}
+
 async function callback(env: Env, request: Request) {
   const url = new URL(request.url)
   const flow = await verify<{ state: string; verifier: string; exp: number }>(env, readCookie(request, FLOW_COOKIE))
   const code = url.searchParams.get('code')
-  if (!flow || !code || url.searchParams.get('state') !== flow.state) return json({ error: 'Invalid sign-in state' }, 400)
+  if (!flow || !code || url.searchParams.get('state') !== flow.state) return signInFailed(request)
   const res = await fetch(`${env.OIDC_ISSUER}/oauth2/token`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
-      Authorization: `Basic ${btoa(`${env.OIDC_CLIENT_ID}:${env.OIDC_CLIENT_SECRET}`)}`,
+      Authorization: `Basic ${btoa(`${encodeURIComponent(env.OIDC_CLIENT_ID)}:${encodeURIComponent(env.OIDC_CLIENT_SECRET)}`)}`,
     },
     body: new URLSearchParams({
       grant_type: 'authorization_code', code, code_verifier: flow.verifier,
       redirect_uri: `${url.origin}/api/auth/callback`,
     }),
   })
-  if (!res.ok) return json({ error: 'Sign-in failed' }, 502)
+  if (!res.ok) { console.error(JSON.stringify({ event: 'oidc_token_failed', status: res.status })); return signInFailed(request) }
   const { access_token } = await res.json<{ access_token?: string }>()
-  if (!access_token) return json({ error: 'Sign-in failed' }, 502)
+  if (!access_token) { console.error(JSON.stringify({ event: 'oidc_no_access_token' })); return signInFailed(request) }
   // Identity comes from the issuer's userinfo endpoint over the back channel, not from client-parsed tokens.
   const info = await fetch(`${env.OIDC_ISSUER}/oauth2/userinfo`, { headers: { Authorization: `Bearer ${access_token}` } })
   const claims = info.ok ? await info.json<{ sub?: string; name?: string }>() : {}
-  if (!claims.sub) return json({ error: 'Sign-in failed' }, 502)
+  if (!claims.sub) { console.error(JSON.stringify({ event: 'oidc_userinfo_failed', status: info.status })); return signInFailed(request) }
   const token = await sign(env, { sub: claims.sub, name: claims.name, exp: Math.floor(Date.now() / 1000) + SESSION_TTL })
   const headers = new Headers({ Location: '/', 'Cache-Control': 'no-store' })
   headers.append('Set-Cookie', cookie(request, SESSION_COOKIE, token, SESSION_TTL))
