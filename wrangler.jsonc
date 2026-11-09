@@ -6,7 +6,8 @@
   "workers_dev": false,
   "routes": [{ "pattern": "pixelforge.aksisonline.com", "custom_domain": true }],
   "preview_urls": false,
-  "assets": { "directory": "./dist", "binding": "ASSETS", "not_found_handling": "single-page-application", "run_worker_first": ["/api/*"] },
+  "assets": { "directory": "./dist", "binding": "ASSETS", "not_found_handling": "single-page-application", "run_worker_first": true },
   "vars": { "OIDC_ISSUER": "https://auth.aksisonline.com/api/auth", "OIDC_CLIENT_ID": "pixelforge", "MODEL_NAME": "gemini-2.5-flash-image" },
+  "flagship": [{ "binding": "FLAGS", "app_id": "b7b2670d-25fd-4624-a75a-c5e6b00ca4e4" }],
   "services": [{ "binding": "ACCESS", "service": "aks-access-backend", "entrypoint": "AccessService" }]
 }

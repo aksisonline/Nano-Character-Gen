@@ -6,6 +6,7 @@ import { ASPECT_RATIOS, buildAnimationPrompt, buildSpritePrompt } from '../share
 import type { Env } from './env'
 import { FLOW_COOKIE, SESSION_COOKIE, SESSION_TTL, b64u, cookie, enc, json, rand, readCookie, session, sign, unb64u, verify } from './session'
 import { handleCharacters } from './characters'
+import { getOutage, type Outage } from './flags'
 
 async function login(env: Env, request: Request) {
   const url = new URL(request.url)
@@ -120,10 +121,36 @@ async function generate(env: Env, request: Request, kind: 'sprite' | 'animation'
   return json({ image: out.image, usage })
 }
 
+const RETRY_AFTER = '300'
+
+async function outageResponse(env: Env, request: Request, outage: Outage, isApi: boolean): Promise<Response> {
+  const headers = { 'Cache-Control': 'no-store', 'Retry-After': RETRY_AFTER }
+  if (isApi) return json({ error: 'Service temporarily out of service', outage }, 503, headers)
+  // Serve the SPA shell with the outage details injected; index.tsx renders <OutagePage/> when it sees them.
+  const shell = await env.ASSETS.fetch(new Request(new URL('/', request.url).toString(), { headers: request.headers }))
+  const payload = JSON.stringify(outage).replace(/</g, '\\u003c').replace(/\u2028|\u2029/g, ' ')
+  const res = new HTMLRewriter()
+    .on('head', { element(el) { el.append(`<script>window.__PF_OUTAGE__=${payload}</script>`, { html: true }) } })
+    .transform(shell)
+  const out = new Response(res.body, { status: 503, headers: res.headers })
+  for (const [k, v] of Object.entries(headers)) out.headers.set(k, v)
+  out.headers.delete('ETag')
+  return out
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const { pathname } = new URL(request.url)
-    if (!pathname.startsWith('/api/')) return env.ASSETS.fetch(request)
+    const url = new URL(request.url)
+    const { pathname } = url
+    const isApi = pathname.startsWith('/api/')
+    // Kill switch (Cloudflare Flagship `site-outage`). Static files (paths with an extension), the public
+    // /fun arcade bypass it; every other page and all /api/* calls is replaced by the outage page / 503.
+    const isPage = !isApi && !/\.[a-z0-9]+$/i.test(pathname) && pathname !== '/fun' && pathname !== '/fun/'
+    if (isApi || isPage) {
+      const outage = await getOutage(env, request)
+      if (outage) return outageResponse(env, request, outage, isApi)
+    }
+    if (!isApi) return env.ASSETS.fetch(request)
     try {
       const characters = await handleCharacters(request, env)
       if (characters) return characters
