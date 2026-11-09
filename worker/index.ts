@@ -3,68 +3,9 @@
 // The Gemini key never reaches the browser.
 import { ASPECT_RATIOS, buildAnimationPrompt, buildSpritePrompt } from '../shared/prompts'
 
-interface AccessRpc {
-  reservePixelForge(userId: string, turnId: string, kind: 'sprite' | 'animation'): Promise<{
-    allowed: boolean; reason?: string; remaining: number; resetsAt: string; reservationId?: string
-  }>
-  finishPixelForge(userId: string, turnId: string, reservationId: string, succeeded: boolean): Promise<void>
-  getPixelForgeUsage(userId: string): Promise<{ limit: number; remaining: number; resetsAt: string }>
-}
-interface Env {
-  ASSETS: Fetcher
-  ACCESS: AccessRpc
-  GEMINI_API_KEY: string
-  SESSION_SECRET: string
-  OIDC_CLIENT_SECRET: string
-  OIDC_ISSUER: string
-  OIDC_CLIENT_ID: string
-  MODEL_NAME: string
-}
-
-const SESSION_COOKIE = 'pf_session'
-const FLOW_COOKIE = 'pf_flow'
-const SESSION_TTL = 7 * 86_400
-const enc = new TextEncoder()
-const b64u = (b: ArrayBuffer | Uint8Array) =>
-  btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-const unb64u = (s: string) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0))
-const json = (body: unknown, status = 200, headers: HeadersInit = {}) =>
-  Response.json(body, { status, headers: { 'Cache-Control': 'no-store', ...headers } })
-
-async function hmacKey(secret: string) {
-  return crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'])
-}
-async function sign(env: Env, payload: object) {
-  if (!env.SESSION_SECRET || enc.encode(env.SESSION_SECRET).length < 32) throw new Error('weak secret')
-  const body = b64u(enc.encode(JSON.stringify(payload)))
-  const sig = await crypto.subtle.sign('HMAC', await hmacKey(env.SESSION_SECRET), enc.encode(body))
-  return `${body}.${b64u(sig)}`
-}
-async function verify<T extends { exp: number }>(env: Env, token: string | undefined): Promise<T | null> {
-  if (!token || !env.SESSION_SECRET) return null
-  const [body, sig] = token.split('.')
-  if (!body || !sig) return null
-  try {
-    const ok = await crypto.subtle.verify('HMAC', await hmacKey(env.SESSION_SECRET), unb64u(sig), enc.encode(body))
-    if (!ok) return null
-    const data = JSON.parse(new TextDecoder().decode(unb64u(body))) as T
-    return data.exp > Date.now() / 1000 ? data : null
-  } catch { return null }
-}
-function cookie(request: Request, name: string, value: string, maxAge: number) {
-  const secure = new URL(request.url).protocol === 'https:'
-  return `${secure ? '__Host-' : ''}${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? '; Secure' : ''}`
-}
-function readCookie(request: Request, name: string) {
-  const secure = new URL(request.url).protocol === 'https:'
-  const key = `${secure ? '__Host-' : ''}${name}=`
-  return request.headers.get('Cookie')?.split(/;\s*/).find(c => c.startsWith(key))?.slice(key.length)
-}
-const rand = (n = 32) => b64u(crypto.getRandomValues(new Uint8Array(n)))
-
-async function session(env: Env, request: Request) {
-  return verify<{ sub: string; name?: string; exp: number }>(env, readCookie(request, SESSION_COOKIE))
-}
+import type { Env } from './env'
+import { FLOW_COOKIE, SESSION_COOKIE, SESSION_TTL, b64u, cookie, enc, json, rand, readCookie, session, sign, unb64u, verify } from './session'
+import { handleCharacters } from './characters'
 
 async function login(env: Env, request: Request) {
   const url = new URL(request.url)
@@ -184,6 +125,8 @@ export default {
     const { pathname } = new URL(request.url)
     if (!pathname.startsWith('/api/')) return env.ASSETS.fetch(request)
     try {
+      const characters = await handleCharacters(request, env)
+      if (characters) return characters
       if (pathname === '/api/auth/login' && request.method === 'GET') return await login(env, request)
       if (pathname === '/api/auth/callback' && request.method === 'GET') return await callback(env, request)
       if (pathname === '/api/auth/logout' && request.method === 'POST')

@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Grid3X3, Layers, Maximize, Paintbrush, Film, Sparkles, ZoomIn, ZoomOut } from 'lucide-react';
+import { FolderOpen, Grid3X3, Layers, Maximize, Paintbrush, Film, Sparkles, ZoomIn, ZoomOut } from 'lucide-react';
 import { AppPhase, SpriteAnimation, SpriteMatrix, ToolMode } from './types';
 import {
   DEFAULT_PREVIEW_SCALE,
@@ -12,6 +12,11 @@ import {
 } from './constants';
 import { getAnimationGrid, generateAnimationFrames } from './services/geminiService';
 import { AccountChip, useAccount } from './components/AccountBar';
+import Library from './components/Library';
+import { useAutosave } from './hooks/useAutosave';
+import { getCharacter } from './services/characterApi';
+import { fromDoc, toDoc } from './services/characterCodec';
+import { MAX_PALETTE } from './shared/character';
 import Landing from './components/Landing';
 import { isMagentaLikeHex, processAnimationSheet } from './services/imageProcessingService';
 import { runSpritePipeline } from './services/spritePipeline';
@@ -72,7 +77,7 @@ const MAX_MOBILE_SCALE = 16;
 const App: React.FC = () => {
   const account = useAccount();
   const [entered, setEntered] = useState(() => { try { return sessionStorage.getItem('pf_entered') === '1'; } catch { return false; } });
-  const goHome = () => { setEntered(false); try { sessionStorage.removeItem('pf_entered'); } catch { /* optional */ } };
+  const goHome = () => { setView('studio'); setEntered(false); try { sessionStorage.removeItem('pf_entered'); } catch { /* optional */ } };
   const isMobile = useIsMobile();
   const [fitScale, setFitScale] = useState(6);
   const [mobileZoom, setMobileZoom] = useState<number | null>(null);
@@ -91,6 +96,7 @@ const App: React.FC = () => {
   const [showGrid, setShowGrid] = useState(true);
   const [showJson, setShowJson] = useState(false);
   const [crtOverlay, setCrtOverlay] = useState(false);
+  const [view, setView] = useState<'studio' | 'library'>('studio');
 
   const mobileScale = mobileZoom ?? fitScale;
   const zoomBy = useCallback((delta: 1 | -1) => {
@@ -102,6 +108,40 @@ const App: React.FC = () => {
   }, [fitScale, isMobile]);
 
   const hasSprite = matrix.meta.name !== 'init' || matrix.pixels.some((pixel) => pixel !== 0);
+  const autosave = useAutosave(
+    () => (hasSprite ? toDoc(matrix, prompt) : null),
+    !!account.user && entered && hasSprite && generatingAnimationId === null,
+    [matrix, prompt],
+  );
+
+  const startNewCharacter = useCallback(() => {
+    autosave.reset();
+    setMatrix(emptyMatrix());
+    setCharacterName('');
+    setPrompt('');
+    setSelectedAnimationId(null);
+    setError(null);
+    setPhase(AppPhase.CREATE);
+    setView('studio');
+  }, [autosave]);
+
+  const openCharacter = useCallback(async (id: string) => {
+    try {
+      const { rev, doc } = await getCharacter(id);
+      const loaded = fromDoc(doc);
+      autosave.open(id, rev, toDoc(loaded.matrix, loaded.prompt));
+      setMatrix(loaded.matrix);
+      setPrompt(loaded.prompt);
+      setCharacterName(loaded.matrix.meta.name);
+      setSelectedAnimationId(null);
+      setError(null);
+      setPhase(AppPhase.EDITOR);
+      setView('studio');
+    } catch (err) {
+      throw err instanceof Error ? err : new Error('Could not open that character.');
+    }
+  }, [autosave]);
+
   const handleGenerateBase = useCallback(async () => {
     const description = prompt.trim() || characterName.trim();
     if (!description) {
@@ -124,6 +164,7 @@ const App: React.FC = () => {
     setShowJson(false);
     try {
       const { pixels, palette } = await runSpritePipeline(description);
+      if (phase === AppPhase.CREATE) autosave.reset(); // generating on the Create screen starts a new saved character
       const name = characterName.trim() || 'New Character';
       setMatrix({
         meta: { name, width: SPRITE_WIDTH, height: SPRITE_HEIGHT, created_at: Date.now() },
@@ -139,7 +180,7 @@ const App: React.FC = () => {
     } finally {
       setIsGenerating(false);
     }
-  }, [account.user, account.usage, characterName, matrix.animations.length, prompt]);
+  }, [account.user, account.usage, autosave, characterName, matrix.animations.length, phase, prompt]);
 
   const handleSelectTemplate = useCallback((template: SpriteMatrix) => {
     const copy = {
@@ -149,12 +190,13 @@ const App: React.FC = () => {
       pixels: [...template.pixels],
       animations: [],
     };
+    autosave.reset();
     setMatrix(copy);
     setCharacterName(copy.meta.name);
     setPrompt('');
     setError(null);
     setPhase(AppPhase.EDITOR);
-  }, []);
+  }, [autosave]);
 
   const handleUpdatePixel = useCallback((index: number, colorIndex: number) => {
     setMatrix((previous) => {
@@ -173,6 +215,7 @@ const App: React.FC = () => {
   }, []);
 
   const handleAddColor = useCallback(() => {
+    if (matrix.palette.length >= MAX_PALETTE) return;
     setMatrix((previous) => ({ ...previous, palette: [...previous.palette, '#888888'] }));
     setSelectedColorIndex(matrix.palette.length);
   }, [matrix.palette.length]);
@@ -291,12 +334,31 @@ const App: React.FC = () => {
           ))}
         </div>
         <div className="flex items-center gap-3">
-          <span className="hidden max-w-32 truncate text-[10px] text-gray-500 lg:block">{hasSprite ? matrix.meta.name : 'New character'}</span>
+          <span
+            role="status"
+            title={autosave.message ?? undefined}
+            className={`hidden max-w-40 truncate text-[10px] lg:block ${autosave.state === 'error' ? 'text-red-400' : 'text-gray-500'}`}
+          >
+            {autosave.state === 'saving' ? 'Saving…' : autosave.state === 'error' ? autosave.message : autosave.state === 'saved' ? 'Saved' : hasSprite ? matrix.meta.name : 'New character'}
+          </span>
+          {autosave.state === 'error' && <span className="size-2 bg-red-500 lg:hidden" title={autosave.message ?? undefined} aria-label="Not saved" />}
+          <button
+            type="button"
+            onClick={() => setView((current) => (current === 'library' ? 'studio' : 'library'))}
+            aria-label="My characters"
+            aria-pressed={view === 'library'}
+            title="My characters"
+            className={`game-button game-interactive flex items-center justify-center border text-[10px] ${view === 'library' ? 'border-amber-700 text-amber-400' : 'border-gray-700 text-gray-300'} max-md:w-11 md:gap-1 md:px-2 md:py-1`}
+          >
+            <FolderOpen size={16} /><span className="hidden md:inline">My characters</span>
+          </button>
           <AccountChip account={account} />
         </div>
       </nav>
 
-      {phase === AppPhase.CREATE ? (
+      {view === 'library' ? (
+        <Library currentId={autosave.currentId} onNew={startNewCharacter} onOpen={openCharacter} />
+      ) : phase === AppPhase.CREATE ? (
         <CharacterCreateView
           userName={account.user?.name}
           characterName={characterName}
@@ -465,7 +527,7 @@ const App: React.FC = () => {
       <div
         role="tablist"
         aria-label="Creation steps"
-        className="z-50 flex shrink-0 border-t-4 border-amber-900/80 bg-black md:hidden"
+        className={`z-50 flex shrink-0 border-t-4 border-amber-900/80 bg-black md:hidden ${view === 'library' ? 'hidden' : ''}`}
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
         {STEPS.map((step) => {
