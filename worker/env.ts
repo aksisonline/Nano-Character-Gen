@@ -28,4 +28,6 @@ export interface Env {
   OIDC_ISSUER: string
   OIDC_CLIENT_ID: string
   MODEL_NAME: string
+  /** Cloudflare Flagship binding (site-outage kill switch). Optional: missing => fail open. */
+  FLAGS?: Flagship
 }
