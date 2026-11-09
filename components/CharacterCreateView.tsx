@@ -9,6 +9,8 @@ import { Label } from '@/components/ui/8bit/label';
 import BaseCharacterSelect from './BaseCharacterSelect';
 
 interface CharacterCreateViewProps {
+  /** Signed-in user's display name, shown as a greeting. */
+  userName?: string | null;
   characterName: string;
   onNameChange: (value: string) => void;
   description: string;
@@ -29,6 +31,7 @@ const CharacterCreateView: React.FC<CharacterCreateViewProps> = ({
   onDescriptionChange,
   onCreate,
   isGenerating,
+  userName,
   error,
   matrix,
   scale,
@@ -80,6 +83,9 @@ const CharacterCreateView: React.FC<CharacterCreateViewProps> = ({
       >
         <Card className="w-full">
           <CardHeader className="pb-2">
+            {userName && (
+              <p className="mb-2 truncate text-xs text-amber-400 retro" title={userName}>Hello, {userName}</p>
+            )}
             <CardTitle className="text-sm retro">Create a character</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
