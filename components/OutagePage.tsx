@@ -1,4 +1,3 @@
-import AsteroidsGame from './AsteroidsGame';
 import '../styles/outage.css';
 
 interface OutagePageProps {
@@ -19,14 +18,17 @@ export default function OutagePage({ reason, eta, since }: OutagePageProps) {
         className="mx-auto flex max-w-2xl flex-col items-center gap-6 px-4 py-10 text-center sm:gap-8 sm:px-6 sm:py-16"
         style={{ paddingBottom: 'max(2.5rem, env(safe-area-inset-bottom))' }}
       >
-        <div className="outage-logo mt-2" aria-hidden>
-          <img className="base" src="/sprite.svg" alt="" />
-          <img className="ghost-a" src="/sprite.svg" alt="" />
-          <img className="ghost-b" src="/sprite.svg" alt="" />
-          <i className="outage-spark s1" />
-          <i className="outage-spark s2" />
-          <i className="outage-spark s3" />
-        </div>
+        <a href="/fun" className="outage-logo-link mt-2" aria-label="Enter Arcade: play Asteroids while you wait">
+          <div className="outage-logo" aria-hidden>
+            <img className="base" src="/sprite.svg" alt="" />
+            <img className="ghost-a" src="/sprite.svg" alt="" />
+            <img className="ghost-b" src="/sprite.svg" alt="" />
+            <i className="outage-spark s1" />
+            <i className="outage-spark s2" />
+            <i className="outage-spark s3" />
+          </div>
+          <span className="outage-enter retro" aria-hidden>Enter Arcade</span>
+        </a>
 
         <div className="flex flex-col gap-3">
           <p className="retro text-[10px] tracking-widest text-amber-500 sm:text-xs">
@@ -72,19 +74,6 @@ export default function OutagePage({ reason, eta, since }: OutagePageProps) {
         >
           Check again
         </button>
-
-        <section aria-labelledby="outage-play" className="w-full border-4 border-gray-700 bg-[#101010] p-3 sm:p-4">
-          <h2 id="outage-play" className="retro mb-3 text-[10px] text-gray-300 sm:text-xs">
-            PLAY WHILE YOU WAIT
-          </h2>
-          <AsteroidsGame className="mx-auto block w-full max-w-full" />
-          <p className="mt-3 text-xs text-gray-400">
-            Want more room?{' '}
-            <a href="/fun" className={`text-amber-400 underline underline-offset-2 hover:text-amber-300 ${focusRing}`}>
-              Open the fullscreen arcade
-            </a>
-          </p>
-        </section>
       </main>
     </div>
   );
