@@ -145,7 +145,8 @@ export default {
     const isApi = pathname.startsWith('/api/')
     // Kill switch (Cloudflare Flagship `site-outage`). Static files (paths with an extension), the public
     // /fun arcade bypass it; every other page and all /api/* calls is replaced by the outage page / 503.
-    const isPage = !isApi && !/\.[a-z0-9]+$/i.test(pathname) && pathname !== '/fun' && pathname !== '/fun/'
+    const isStaticFile = /\.[a-z0-9]+$/i.test(pathname) && !/\.html?$/i.test(pathname) // .html is the app shell, so it is gated like a page
+    const isPage = !isApi && !isStaticFile && pathname !== '/fun' && pathname !== '/fun/'
     if (isApi || isPage) {
       const outage = await getOutage(env, request)
       if (outage) return outageResponse(env, request, outage, isApi)
