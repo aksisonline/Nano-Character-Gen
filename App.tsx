@@ -13,6 +13,7 @@ import {
 import { getAnimationGrid, generateAnimationFrames } from './services/geminiService';
 import { AccountChip, useAccount } from './components/AccountBar';
 import Library from './components/Library';
+import AccountPanel from './components/AccountPanel';
 import { useAutosave } from './hooks/useAutosave';
 import { getCharacter } from './services/characterApi';
 import { fromDoc, toDoc } from './services/characterCodec';
@@ -77,9 +78,22 @@ const STEPS = [
 
 const MAX_MOBILE_SCALE = 16;
 
+// AKS-CESS sends the browser back with ?account=linked|link_failed after the OpenAI link flow. Read once, at load.
+const LINK_RETURN: 'linked' | 'link_failed' | null = (() => {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const value = params.get('account');
+    if (value !== 'linked' && value !== 'link_failed') return null;
+    params.delete('account');
+    const rest = params.toString();
+    window.history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash);
+    return value;
+  } catch { return null; }
+})();
+
 const App: React.FC = () => {
   const account = useAccount();
-  const [entered, setEntered] = useState(() => { try { return sessionStorage.getItem('pf_entered') === '1'; } catch { return false; } });
+  const [entered, setEntered] = useState(() => { if (LINK_RETURN) return true; try { return sessionStorage.getItem('pf_entered') === '1'; } catch { return false; } });
   const goHome = () => { setView('studio'); setEntered(false); try { sessionStorage.removeItem('pf_entered'); } catch { /* optional */ } };
   const isMobile = useIsMobile();
   const [fitScale, setFitScale] = useState(6);
@@ -105,7 +119,7 @@ const App: React.FC = () => {
   const [showGrid, setShowGrid] = useState(true);
   const [showJson, setShowJson] = useState(false);
   const [crtOverlay, setCrtOverlay] = useState(false);
-  const [view, setView] = useState<'studio' | 'library'>('studio');
+  const [view, setView] = useState<'studio' | 'library' | 'account'>(LINK_RETURN ? 'account' : 'studio');
 
   const mobileScale = mobileZoom ?? fitScale;
   const zoomBy = useCallback((delta: 1 | -1) => {
@@ -163,7 +177,7 @@ const App: React.FC = () => {
       setError('Sign in with your AKS account to generate.');
       return;
     }
-    if (account.usage && account.usage.remaining <= 0) {
+    if (account.source === 'aks' && account.usage && account.usage.remaining <= 0) {
       setError(`Weekly generation limit reached. Resets ${new Date(account.usage.resetsAt).toLocaleString()}.`);
       return;
     }
@@ -192,7 +206,7 @@ const App: React.FC = () => {
     } finally {
       setIsGenerating(false);
     }
-  }, [account.user, account.usage, autosave, characterName, matrix.animations.length, phase, prompt, resetHistory]);
+  }, [account.user, account.usage, account.source, autosave, characterName, matrix.animations.length, phase, prompt, resetHistory]);
 
   const handleSelectTemplate = useCallback((template: SpriteMatrix) => {
     const copy = {
@@ -341,7 +355,7 @@ const App: React.FC = () => {
       setError('Sign in with your AKS account to generate.');
       return;
     }
-    if (account.usage && account.usage.remaining <= 0) {
+    if (account.source === 'aks' && account.usage && account.usage.remaining <= 0) {
       setError(`Weekly generation limit reached. Resets ${new Date(account.usage.resetsAt).toLocaleString()}.`);
       return;
     }
@@ -372,7 +386,7 @@ const App: React.FC = () => {
     } finally {
       setGeneratingAnimationId(null);
     }
-  }, [account.user, account.usage, handleUpdateAnimation, matrix]);
+  }, [account.user, account.usage, account.source, handleUpdateAnimation, matrix]);
 
   const handleExportAnimation = useCallback((id: string, exportScale: number) => {
     const animation = matrix.animations.find((item) => item.id === id);
@@ -441,11 +455,18 @@ const App: React.FC = () => {
           >
             <FolderOpen size={16} /><span className="hidden md:inline">My characters</span>
           </button>
-          <AccountChip account={account} />
+          <AccountChip account={account} active={view === 'account'} onOpenAccount={() => setView((current) => (current === 'account' ? 'studio' : 'account'))} />
         </div>
       </nav>
 
-      {view === 'library' ? (
+      {view === 'account' ? (
+        <AccountPanel
+          returned={LINK_RETURN}
+          onBack={() => setView('studio')}
+          onOpenLibrary={() => setView('library')}
+          onChanged={() => void account.refresh()}
+        />
+      ) : view === 'library' ? (
         <Library currentId={autosave.currentId} onNew={startNewCharacter} onOpen={openCharacter} />
       ) : phase === AppPhase.CREATE ? (
         <CharacterCreateView
