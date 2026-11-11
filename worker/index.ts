@@ -3,10 +3,12 @@
 // The Gemini key never reaches the browser.
 import { ASPECT_RATIOS, BLOCKED_MESSAGE, buildAnimationPrompt, buildSpritePrompt, chooseKeyColor } from '../shared/prompts'
 
-import type { Env } from './env'
+import type { Env, GenerationSource } from './env'
 import { FLOW_COOKIE, SESSION_COOKIE, SESSION_TTL, b64u, cookie, enc, json, rand, readCookie, session, sign, unb64u, verify } from './session'
 import { handleCharacters } from './characters'
-import { classifyGeminiResponse, geminiUsage } from './gemini'
+import { handleAccount, loadConnections, loadSource, openaiAvailable } from './account'
+import { callOpenAI, isUsageLimit } from './openai'
+import { classifyGeminiResponse, geminiUsage, type GeminiResult } from './gemini'
 import { log, snippet, userTag } from './log'
 import { getOutage, type Outage } from './flags'
 
@@ -49,9 +51,9 @@ async function callback(env: Env, request: Request) {
   if (!access_token) { log('error', 'oidc_no_access_token'); return signInFailed(request) }
   // Identity comes from the issuer's userinfo endpoint over the back channel, not from client-parsed tokens.
   const info = await fetch(`${env.OIDC_ISSUER}/oauth2/userinfo`, { headers: { Authorization: `Bearer ${access_token}` } })
-  const claims = info.ok ? await info.json<{ sub?: string; name?: string }>() : {}
+  const claims = info.ok ? await info.json<{ sub?: string; name?: string; email?: string }>() : {}
   if (!claims.sub) { log('error', 'oidc_userinfo_failed', { status: info.status }); return signInFailed(request) }
-  const token = await sign(env, { sub: claims.sub, name: claims.name, exp: Math.floor(Date.now() / 1000) + SESSION_TTL })
+  const token = await sign(env, { sub: claims.sub, name: claims.name, email: claims.email, exp: Math.floor(Date.now() / 1000) + SESSION_TTL })
   const headers = new Headers({ Location: '/', 'Cache-Control': 'no-store' })
   headers.append('Set-Cookie', cookie(request, SESSION_COOKIE, token, SESSION_TTL))
   headers.append('Set-Cookie', cookie(request, FLOW_COOKIE, '', 0))
@@ -61,7 +63,35 @@ async function callback(env: Env, request: Request) {
 const MAX_PROMPT = 600
 const MAX_IMAGE_B64 = 2_000_000
 
-async function callGemini(env: Env, parts: unknown[], aspectRatio: string) {
+type Out =
+  | { ok: true; result: GeminiResult; usage?: ReturnType<typeof geminiUsage>; finishReason?: string }
+  | { ok: false; providerFailure: true; problem?: 'usage_limit' | 'reauth_required' }
+
+// Generation on the user's own linked OpenAI plan. The token comes from AKS-Access per call and is never stored or logged.
+async function callOpenAIPlan(env: Env, sub: string, text: string, refImage: string | undefined, aspectRatio: string): Promise<Out> {
+  const access = await env.ACCESS.getProviderAccess!(sub, 'openai', 'pixelforge')
+  if ('reason' in access) {
+    log('warn', 'openai_access_denied', { reason: access.reason })
+    return { ok: false, providerFailure: true, problem: access.reason === 'usage_limit' ? 'usage_limit' : access.reason === 'reauth_required' || access.reason === 'not_linked' ? 'reauth_required' : undefined }
+  }
+  const res = await callOpenAI(env, access.accessToken, text, refImage, aspectRatio)
+  if ('status' in res) {
+    log('error', 'openai_http_error', { status: res.status, code: res.code })
+    return { ok: false, providerFailure: true, problem: res.status === 401 ? 'reauth_required' : res.status === 429 || isUsageLimit(res.code) ? 'usage_limit' : undefined }
+  }
+  const r = res.result
+  switch (r.kind) {
+    case 'image': return { ok: true, result: r }
+    case 'empty': return { ok: true, result: { kind: 'empty' } }
+    case 'failed':
+      if (/moderation|content_policy|safety/i.test(r.code ?? '')) return { ok: true, result: { kind: 'blocked', reason: r.code! } }
+      log('error', 'openai_response_failed', { code: r.code })
+      return { ok: false, providerFailure: true, problem: isUsageLimit(r.code) ? 'usage_limit' : undefined }
+    default: log('error', 'openai_response_incomplete', { kind: r.kind }); return { ok: false, providerFailure: true }
+  }
+}
+
+async function callGemini(env: Env, parts: unknown[], aspectRatio: string): Promise<Out> {
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${env.MODEL_NAME}:generateContent`,
     {
@@ -89,11 +119,12 @@ async function generate(env: Env, request: Request, kind: 'sprite' | 'animation'
   const turnId = body?.turnId
   if (typeof turnId !== 'string' || !/^[0-9a-f-]{36}$/i.test(turnId)) return json({ error: 'Invalid turnId' }, 400)
 
-  let parts: unknown[], aspectRatio: string
+  let parts: unknown[], aspectRatio: string, text: string, refImage: string | undefined
   const str = (v: unknown, max: number) => typeof v === 'string' && v.trim().length > 0 && v.length <= max
   if (kind === 'sprite') {
     if (!str(body.prompt, MAX_PROMPT)) return json({ error: 'Invalid prompt' }, 400)
-    parts = [{ text: buildSpritePrompt(body.prompt, chooseKeyColor(body.prompt)) }]
+    text = buildSpritePrompt(body.prompt, chooseKeyColor(body.prompt))
+    parts = [{ text }]
     aspectRatio = '2:3'
   } else {
     const { name, prompt, frameCount, columns, rows, aspectRatio: ar, image } = body
@@ -105,29 +136,40 @@ async function generate(env: Env, request: Request, kind: 'sprite' | 'animation'
       || typeof image !== 'string' || image.length > MAX_IMAGE_B64 || !/^[A-Za-z0-9+/=]+$/.test(image)) {
       return json({ error: 'Invalid request' }, 400)
     }
-    parts = [{ text: buildAnimationPrompt({ name, prompt, frameCount, columns, rows }, key) }, { inlineData: { mimeType: 'image/png', data: image } }]
+    text = buildAnimationPrompt({ name, prompt, frameCount, columns, rows }, key)
+    refImage = image
+    parts = [{ text }, { inlineData: { mimeType: 'image/png', data: image } }]
     aspectRatio = ar
+  }
+
+  // The user's chosen source. 'openai' = their own linked plan; it must still be linked and image-capable right now.
+  let source: GenerationSource = 'aks'
+  if (await loadSource(env, user.sub) === 'openai') {
+    if (!openaiAvailable(env, await loadConnections(env, user.sub))) {
+      return json({ error: 'openai_unavailable', message: 'Your linked OpenAI account is not available for generation. Switch back to your AKS allowance in Account.' }, 409)
+    }
+    source = 'openai'
   }
 
   // Reserve before any inference; failure to reach the quota service fails closed.
   let r
-  try { r = await env.ACCESS.reservePixelForge(user.sub, turnId, kind) }
+  try { r = await env.ACCESS.reservePixelForge(user.sub, turnId, kind, source) }
   catch (err) { log('error', 'quota_service_unavailable', { kind, message: err instanceof Error ? err.message : String(err) }); return json({ error: 'Usage service unavailable' }, 503) }
   if (!r.allowed || !r.reservationId) {
     log('info', 'quota_denied', { kind, user: await userTag(user.sub), reason: r.reason })
     return json({ error: 'quota', reason: r.reason, remaining: r.remaining, resetsAt: r.resetsAt }, 429)
   }
-  let out: Awaited<ReturnType<typeof callGemini>>
+  let out: Out
   const t0 = Date.now()
   const who = await userTag(user.sub)
-  try { out = await callGemini(env, parts, aspectRatio) }
+  try { out = source === 'openai' ? await callOpenAIPlan(env, user.sub, text, refImage, aspectRatio) : await callGemini(env, parts, aspectRatio) }
   catch (err) {
     log('error', 'gemini_fetch_failed', { kind, user: who, message: err instanceof Error ? err.message : String(err) })
-    out = { ok: false as const, providerFailure: true }
+    out = { ok: false, providerFailure: true }
   }
   const result = out.ok ? out.result : null
   log(out.ok && result?.kind === 'image' ? 'info' : 'warn', 'gemini_call', {
-    kind, user: who, turnId, model: env.MODEL_NAME, aspectRatio, ms: Date.now() - t0,
+    kind, user: who, turnId, source, model: source === 'openai' ? env.OPENAI_IMAGE_MODEL : env.MODEL_NAME, aspectRatio, ms: Date.now() - t0,
     outcome: result ? result.kind : 'provider_failure',
     reason: result?.kind === 'blocked' ? result.reason : undefined,
     finishReason: out.ok ? out.finishReason : undefined,
@@ -136,6 +178,8 @@ async function generate(env: Env, request: Request, kind: 'sprite' | 'animation'
   // Provider failures, blocked prompts and empty responses are not charged; only a delivered image is.
   const succeeded = result?.kind === 'image'
   try { await env.ACCESS.finishPixelForge(user.sub, turnId, r.reservationId, succeeded) } catch (err) { log('error', 'quota_finish_failed', { kind, user: who, turnId, succeeded, message: err instanceof Error ? err.message : String(err) }) }
+  if ('problem' in out && out.problem === 'usage_limit') return json({ error: 'quota', reason: 'openai_usage_limit' }, 429)
+  if ('problem' in out && out.problem === 'reauth_required') return json({ error: 'openai_reauth', message: 'Reconnect your OpenAI account in Account to keep generating with it.' }, 409)
   if (!result) return json({ error: 'Image provider failed' }, 502)
   if (result.kind === 'blocked') {
     log('warn', 'gemini_blocked', { kind, user: who, reason: result.reason, prompt: snippet(body.prompt) })
@@ -144,7 +188,7 @@ async function generate(env: Env, request: Request, kind: 'sprite' | 'animation'
   if (result.kind === 'empty') return json({ error: 'No image generated' }, 502)
   const image = result.image
   const usage = await env.ACCESS.getPixelForgeUsage(user.sub).catch(() => null)
-  return json({ image, usage })
+  return json({ image, usage, source })
 }
 
 const RETRY_AFTER = '300'
@@ -196,6 +240,8 @@ async function handle(request: Request, env: Env): Promise<Response> {
     try {
       const characters = await handleCharacters(request, env)
       if (characters) return characters
+      const account = await handleAccount(request, env)
+      if (account) return account
       if (pathname === '/api/auth/login' && request.method === 'GET') return await login(env, request)
       if (pathname === '/api/auth/callback' && request.method === 'GET') return await callback(env, request)
       if (pathname === '/api/auth/logout' && request.method === 'POST')
@@ -204,7 +250,8 @@ async function handle(request: Request, env: Env): Promise<Response> {
         const user = await session(env, request)
         if (!user) return json({ user: null })
         const usage = await env.ACCESS.getPixelForgeUsage(user.sub).catch(() => null)
-        return json({ user: { name: user.name ?? null }, usage })
+        const generationSource = await loadSource(env, user.sub)
+        return json({ user: { name: user.name ?? null, email: user.email ?? null }, usage, generationSource })
       }
       if (pathname === '/api/generate/sprite' && request.method === 'POST') return await generate(env, request, 'sprite')
       if (pathname === '/api/generate/animation' && request.method === 'POST') return await generate(env, request, 'animation')

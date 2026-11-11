@@ -19,6 +19,8 @@ async function post(path: string, payload: Record<string, unknown>): Promise<str
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) throw new AuthRequiredError('Sign in with your AKS account to generate.');
   if (res.status === 422 && data.error === 'blocked') throw new ContentBlockedError(data.message || 'This prompt was blocked. Try rewording it.');
+  if (res.status === 409 && (data.error === 'openai_unavailable' || data.error === 'openai_reauth')) throw new Error(data.message || 'Your OpenAI account is not available. Check Account.');
+  if (res.status === 429 && data.reason === 'openai_usage_limit') throw new QuotaError('Your ChatGPT plan usage limit is reached. Try again later, or switch to your AKS allowance in Account.');
   if (res.status === 429) {
     const when = data.resetsAt ? new Date(data.resetsAt).toLocaleString() : 'next week';
     throw new QuotaError(

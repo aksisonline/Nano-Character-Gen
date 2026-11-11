@@ -42,6 +42,6 @@ export function readCookie(request: Request, name: string) {
 export const rand = (n = 32) => b64u(crypto.getRandomValues(new Uint8Array(n)))
 
 export async function session(env: Env, request: Request) {
-  return verify<{ sub: string; name?: string; exp: number }>(env, readCookie(request, SESSION_COOKIE))
+  return verify<{ sub: string; name?: string; email?: string; exp: number }>(env, readCookie(request, SESSION_COOKIE))
 }
 
