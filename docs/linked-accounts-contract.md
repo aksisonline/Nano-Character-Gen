@@ -110,3 +110,9 @@ may call it, and only for their own `provider` scope. It is the *only* path a to
   open-source/local apps, and image generation is listed unsupported. The AKS-Access vault exists but is unreachable until
   OpenAI offers a hosted flow. So `planUsage`/`imageGeneration` stay `false` and PixelForge must keep AKS generation as the source.
 - Links store issuer, client id, `sub` and a display label only; no OpenAI tokens or raw ID tokens are kept.
+- **Providers are a registry** (2026-11-11, follow-up). `/connect/<provider>?client=<app>` is generic; `/connect/openai?client=pixelforge` is
+  unchanged. `provider` args are registry ids (still just `'openai'`); unknown ids throw. `GET /api/auth/providers` (public) lists
+  configured providers for UI decisions. RPC signatures and return shapes are unchanged.
+- **Sign-in with OpenAI exists on the AKS-Access sign-in page** (only when OpenAI is configured, and only for an OpenAI subject that is already
+  linked, signing into that linked account). It never creates or links accounts and does not affect apps: PixelForge still signs in via AKS OIDC.
+
