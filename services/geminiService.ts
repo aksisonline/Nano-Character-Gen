@@ -4,6 +4,7 @@ export interface UsageInfo { limit: number; remaining: number; resetsAt: string 
 
 export class AuthRequiredError extends Error {}
 export class QuotaError extends Error {}
+export class ContentBlockedError extends Error {}
 
 let usageListener: ((usage: UsageInfo) => void) | undefined;
 export const onUsageChange = (fn: (usage: UsageInfo) => void) => { usageListener = fn; };
@@ -17,6 +18,7 @@ async function post(path: string, payload: Record<string, unknown>): Promise<str
   });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) throw new AuthRequiredError('Sign in with your AKS account to generate.');
+  if (res.status === 422 && data.error === 'blocked') throw new ContentBlockedError(data.message || 'This prompt was blocked. Try rewording it.');
   if (res.status === 429) {
     const when = data.resetsAt ? new Date(data.resetsAt).toLocaleString() : 'next week';
     throw new QuotaError(
@@ -71,7 +73,8 @@ export const generateAnimationFrames = (
   animationName: string,
   animationPrompt: string,
   frameCount: number,
-  grid: AnimationGrid
+  grid: AnimationGrid,
+  key: 'magenta' | 'green' = 'magenta'
 ) => post('/api/generate/animation', {
   image: baseSpriteBase64.replace(/^data:image\/(png|jpeg|jpg);base64,/, ''),
   name: animationName,
@@ -80,4 +83,5 @@ export const generateAnimationFrames = (
   columns: grid.columns,
   rows: grid.rows,
   aspectRatio: grid.aspectRatio,
+  key,
 });

@@ -1,8 +1,14 @@
-import { SPRITE_HEIGHT, SPRITE_WIDTH } from '../constants';
+import { GEN_HEIGHT_384, GEN_WIDTH_256, SPRITE_HEIGHT, SPRITE_WIDTH } from '../constants';
 import { RGB } from '../types';
+import { keyBackground, mapToPalette } from './chromaKey';
+import { keepMainComponents, modeDownscale, removeOrphans } from './spriteCleanup';
 
 const MAGENTA = { r: 255, g: 0, b: 255 };
-const MAGENTA_TOLERANCE = 130;
+/**
+ * Only near-pure magenta (leftover key pixels from older characters) is hidden in the UI. The keyer already removes the real
+ * background, so legitimate pink/magenta/green palette colors (pink hair) must stay visible.
+ */
+export const KEY_DISPLAY_TOLERANCE = 40;
 
 function hexToRgb(hex: string): RGB {
   const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -15,32 +21,26 @@ function colorDistance(a: RGB, b: RGB): number {
   return Math.hypot(a.r - b.r, a.g - b.g, a.b - b.b);
 }
 
-export function isMagentaLike(r: number, g: number, b: number, tolerance = MAGENTA_TOLERANCE): boolean {
+/**
+ * True for colors within `tolerance` of pure magenta (#FF00FF): leftovers from older characters. Green is NOT
+ * hidden: green-keyed sprites never keep key pixels (the keyer removes them) and slime/goblin palettes are real.
+ */
+export function isKeyLike(r: number, g: number, b: number, tolerance = KEY_DISPLAY_TOLERANCE): boolean {
   return colorDistance({ r, g, b }, MAGENTA) < tolerance;
 }
 
-/** Magenta-like palette entries are treated as transparent throughout the app. */
-export function isMagentaLikeHex(hex: string, tolerance = MAGENTA_TOLERANCE): boolean {
+export function isKeyLikeHex(hex: string, tolerance = KEY_DISPLAY_TOLERANCE): boolean {
   const { r, g, b } = hexToRgb(hex);
-  return isMagentaLike(r, g, b, tolerance);
+  return isKeyLike(r, g, b, tolerance);
 }
 
-function getDominantColor(data: Uint8ClampedArray): RGB {
-  const counts = new Map<string, number>();
-  let best = '255,0,255';
-  let maxCount = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    if (data[i + 3] < 128) continue;
-    const key = `${data[i]},${data[i + 1]},${data[i + 2]}`;
-    const count = (counts.get(key) ?? 0) + 1;
-    counts.set(key, count);
-    if (count > maxCount) {
-      best = key;
-      maxCount = count;
-    }
-  }
-  const [r, g, b] = best.split(',').map(Number);
-  return { r, g, b };
+/** Legacy names: key-like palette entries are treated as transparent throughout the app. */
+export function isMagentaLike(r: number, g: number, b: number, tolerance = KEY_DISPLAY_TOLERANCE): boolean {
+  return isKeyLike(r, g, b, tolerance);
+}
+
+export function isMagentaLikeHex(hex: string, tolerance = KEY_DISPLAY_TOLERANCE): boolean {
+  return isKeyLikeHex(hex, tolerance);
 }
 
 /**
@@ -66,6 +66,16 @@ export async function processAnimationSheet(
   });
 
   const frames: number[][] = [];
+  // Locked palette entries (skip index 0 and null); lockedIndex maps compact index -> real palette index.
+  const lockedRgb: number[][] = [];
+  const lockedIndex: number[] = [];
+  for (let i = 1; i < palette.length; i++) {
+    const color = palette[i];
+    if (!color || isKeyLikeHex(color)) continue; // hidden entries would turn matched pixels into holes
+    const { r, g, b } = hexToRgb(color);
+    lockedRgb.push([r, g, b]);
+    lockedIndex.push(i);
+  }
   const cellWidth = img.width / columns;
   const cellHeight = img.height / rows;
 
@@ -73,8 +83,8 @@ export async function processAnimationSheet(
     const column = frameIndex % columns;
     const row = Math.floor(frameIndex / columns);
     const canvas = document.createElement('canvas');
-    canvas.width = SPRITE_WIDTH;
-    canvas.height = SPRITE_HEIGHT;
+    canvas.width = GEN_WIDTH_256;
+    canvas.height = GEN_HEIGHT_384;
     const context = canvas.getContext('2d', { willReadFrequently: true });
     if (!context) throw new Error('Could not create animation frame canvas.');
     context.imageSmoothingEnabled = false;
@@ -86,36 +96,18 @@ export async function processAnimationSheet(
       cellHeight,
       0,
       0,
-      SPRITE_WIDTH,
-      SPRITE_HEIGHT
+      GEN_WIDTH_256,
+      GEN_HEIGHT_384
     );
 
-    const { data } = context.getImageData(0, 0, SPRITE_WIDTH, SPRITE_HEIGHT);
-    const background = getDominantColor(data);
-    const frame = new Array<number>(SPRITE_WIDTH * SPRITE_HEIGHT).fill(0);
-    for (let i = 0; i < frame.length; i++) {
-      const offset = i * 4;
-      const r = data[offset];
-      const g = data[offset + 1];
-      const b = data[offset + 2];
-      if (data[offset + 3] < 128 || isMagentaLike(r, g, b) ||
-          colorDistance({ r, g, b }, background) < 75) {
-        continue;
-      }
-
-      let closestIndex = 0;
-      let closestDistance = Infinity;
-      for (let colorIndex = 1; colorIndex < palette.length; colorIndex++) {
-        const color = palette[colorIndex];
-        if (!color || isMagentaLikeHex(color)) continue;
-        const distance = colorDistance({ r, g, b }, hexToRgb(color));
-        if (distance < closestDistance) {
-          closestIndex = colorIndex;
-          closestDistance = distance;
-        }
-      }
-      frame[i] = closestIndex;
-    }
+    const { data } = context.getImageData(0, 0, GEN_WIDTH_256, GEN_HEIGHT_384);
+    const { mask } = keyBackground(data, GEN_WIDTH_256, GEN_HEIGHT_384);
+    const indexMap = mapToPalette(data, mask, lockedRgb);
+    const mapped = new Uint8Array(indexMap.length);
+    for (let i = 0; i < indexMap.length; i++) mapped[i] = indexMap[i] ? lockedIndex[indexMap[i] - 1] : 0;
+    let frame = modeDownscale(mapped, GEN_WIDTH_256, GEN_HEIGHT_384, SPRITE_WIDTH, SPRITE_HEIGHT);
+    frame = removeOrphans(frame);
+    frame = keepMainComponents(frame);
     frames.push(frame);
   }
   return frames;

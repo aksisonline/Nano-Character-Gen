@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FolderOpen, Grid3X3, Layers, Maximize, Paintbrush, Film, Sparkles, ZoomIn, ZoomOut } from 'lucide-react';
 import { AppPhase, SpriteAnimation, SpriteMatrix, ToolMode } from './types';
 import {
@@ -24,10 +24,13 @@ import { downloadSpriteGif } from './lib/gifExport';
 import AnimationStudio from './components/AnimationStudio';
 import CharacterCreateView from './components/CharacterCreateView';
 import CharacterPanel from './components/CharacterPanel';
-import PalettePanel from './components/PalettePanel';
+import PalettePanel, { isPaintableColor, paintableIndices } from './components/PalettePanel';
+import { createHistory, pushHistory, redoHistory, undoHistory, MAX_BRUSH_SIZE, type History } from './services/editorTools';
+import { EditorToolPanel, type EditorToolbarProps } from './components/EditorToolbar';
 import PixelEasel from './components/PixelEasel';
 import CanvasViewport from './components/CanvasViewport';
 import { MobileEditorDock, MobileEditorSheet } from './components/MobileEditorDock';
+import { chooseKeyForPalette } from './shared/prompts';
 import { useIsMobile } from './hooks/useIsMobile';
 import { Button } from '@/components/ui/8bit/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/8bit/card';
@@ -93,6 +96,12 @@ const App: React.FC = () => {
   const [scale, setScale] = useState(DEFAULT_PREVIEW_SCALE);
   const [selectedColorIndex, setSelectedColorIndex] = useState(1);
   const [toolMode, setToolMode] = useState<ToolMode>(ToolMode.PENCIL);
+  const [brushSize, setBrushSize] = useState(1);
+  const [mirror, setMirror] = useState(false);
+  const historyRef = useRef<History<number[]>>(createHistory());
+  const [, bumpHistory] = useState(0);
+  const setHistory = (next: History<number[]>) => { historyRef.current = next; bumpHistory((n) => n + 1); };
+  const resetHistory = useCallback(() => { historyRef.current = createHistory(); bumpHistory((n) => n + 1); }, []);
   const [showGrid, setShowGrid] = useState(true);
   const [showJson, setShowJson] = useState(false);
   const [crtOverlay, setCrtOverlay] = useState(false);
@@ -116,6 +125,7 @@ const App: React.FC = () => {
 
   const startNewCharacter = useCallback(() => {
     autosave.reset();
+    resetHistory();
     setMatrix(emptyMatrix());
     setCharacterName('');
     setPrompt('');
@@ -123,13 +133,14 @@ const App: React.FC = () => {
     setError(null);
     setPhase(AppPhase.CREATE);
     setView('studio');
-  }, [autosave]);
+  }, [autosave, resetHistory]);
 
   const openCharacter = useCallback(async (id: string) => {
     try {
       const { rev, doc } = await getCharacter(id);
       const loaded = fromDoc(doc);
       autosave.open(id, rev, toDoc(loaded.matrix, loaded.prompt));
+      resetHistory();
       setMatrix(loaded.matrix);
       setPrompt(loaded.prompt);
       setCharacterName(loaded.matrix.meta.name);
@@ -140,7 +151,7 @@ const App: React.FC = () => {
     } catch (err) {
       throw err instanceof Error ? err : new Error('Could not open that character.');
     }
-  }, [autosave]);
+  }, [autosave, resetHistory]);
 
   const handleGenerateBase = useCallback(async () => {
     const description = prompt.trim() || characterName.trim();
@@ -165,6 +176,7 @@ const App: React.FC = () => {
     try {
       const { pixels, palette } = await runSpritePipeline(description);
       if (phase === AppPhase.CREATE) autosave.reset(); // generating on the Create screen starts a new saved character
+      resetHistory();
       const name = characterName.trim() || 'New Character';
       setMatrix({
         meta: { name, width: SPRITE_WIDTH, height: SPRITE_HEIGHT, created_at: Date.now() },
@@ -180,7 +192,7 @@ const App: React.FC = () => {
     } finally {
       setIsGenerating(false);
     }
-  }, [account.user, account.usage, autosave, characterName, matrix.animations.length, phase, prompt]);
+  }, [account.user, account.usage, autosave, characterName, matrix.animations.length, phase, prompt, resetHistory]);
 
   const handleSelectTemplate = useCallback((template: SpriteMatrix) => {
     const copy = {
@@ -191,20 +203,96 @@ const App: React.FC = () => {
       animations: [],
     };
     autosave.reset();
+    resetHistory();
     setMatrix(copy);
     setCharacterName(copy.meta.name);
     setPrompt('');
     setError(null);
     setPhase(AppPhase.EDITOR);
-  }, [autosave]);
+  }, [autosave, resetHistory]);
 
-  const handleUpdatePixel = useCallback((index: number, colorIndex: number) => {
-    setMatrix((previous) => {
-      const pixels = [...previous.pixels];
-      pixels[index] = colorIndex;
-      return { ...previous, pixels };
-    });
+  const setPixels = useCallback((pixels: number[]) => {
+    setMatrix((previous) => ({ ...previous, pixels }));
   }, []);
+
+  const commitStroke = useCallback((before: number[]) => {
+    setHistory(pushHistory(historyRef.current, before));
+  }, []);
+
+  const pixelsRef = useRef(matrix.pixels);
+  pixelsRef.current = matrix.pixels;
+
+  const undo = useCallback(() => {
+    const result = undoHistory(historyRef.current, pixelsRef.current);
+    if (!result) return;
+    setHistory(result.history);
+    setPixels(result.value);
+  }, [setPixels]);
+
+  const redo = useCallback(() => {
+    const result = redoHistory(historyRef.current, pixelsRef.current);
+    if (!result) return;
+    setHistory(result.history);
+    setPixels(result.value);
+  }, [setPixels]);
+
+  const clearCanvas = useCallback(() => {
+    if (pixelsRef.current.every((pixel) => pixel === 0)) return;
+    setHistory(pushHistory(historyRef.current, pixelsRef.current));
+    setPixels(new Array(pixelsRef.current.length).fill(0));
+  }, [setPixels]);
+
+  // Never paint with transparent / key-like entries: fall back to the first real color.
+  const activeColorIndex = isPaintableColor(matrix.palette, selectedColorIndex)
+    ? selectedColorIndex
+    : (paintableIndices(matrix.palette)[0] ?? 1);
+
+  const handlePick = useCallback((paletteIndex: number, viaTool: boolean) => {
+    if (isPaintableColor(matrix.palette, paletteIndex)) {
+      setSelectedColorIndex(paletteIndex);
+      if (viaTool) setToolMode(ToolMode.PENCIL);
+    } else {
+      setToolMode(ToolMode.ERASER); // picking a transparent pixel means "erase"
+    }
+  }, [matrix.palette]);
+
+  const toolbar: EditorToolbarProps = {
+    toolMode,
+    onToolModeChange: setToolMode,
+    brushSize,
+    onBrushSizeChange: setBrushSize,
+    mirror,
+    onMirrorChange: setMirror,
+    canUndo: historyRef.current.past.length > 0,
+    canRedo: historyRef.current.future.length > 0,
+    onUndo: undo,
+    onRedo: redo,
+    onClear: clearCanvas,
+  };
+
+  const inEditor = entered && !!account.user && view === 'studio' && phase === AppPhase.EDITOR;
+  useEffect(() => {
+    if (!inEditor) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+      if (mod && !e.altKey) {
+        if (key === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
+        else if (key === 'y') { e.preventDefault(); redo(); }
+        return;
+      }
+      if (e.altKey) return;
+      const tools: Record<string, ToolMode> = { b: ToolMode.PENCIL, e: ToolMode.ERASER, g: ToolMode.FILL, i: ToolMode.PICKER };
+      if (tools[key]) { e.preventDefault(); setToolMode(tools[key]); }
+      else if (key === 'm') setMirror((value) => !value);
+      else if (key === '[') setBrushSize((size) => Math.max(1, size - 1));
+      else if (key === ']') setBrushSize((size) => Math.min(MAX_BRUSH_SIZE, size + 1));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [inEditor, undo, redo]);
 
   const handleUpdatePaletteColor = useCallback((index: number, color: string) => {
     setMatrix((previous) => {
@@ -267,7 +355,8 @@ const App: React.FC = () => {
         animation.name,
         animation.prompt,
         animation.frameCount,
-        grid
+        grid,
+        chooseKeyForPalette(matrix.palette)
       );
       const frames = await processAnimationSheet(
         sheet,
@@ -380,8 +469,6 @@ const App: React.FC = () => {
             onPromptChange={setPrompt}
             isGenerating={isGenerating}
             error={error}
-            toolMode={toolMode}
-            onToolModeChange={setToolMode}
             onGenerate={handleGenerateBase}
             onConfirmAndAnimate={() => changePhase(AppPhase.ANIMATOR)}
             onDownloadPng={handleDownloadPng}
@@ -426,28 +513,28 @@ const App: React.FC = () => {
                     compact
                     matrix={matrix}
                     scale={mobileScale}
-                    selectedColorIndex={selectedColorIndex}
-                    toolMode={toolMode}
-                    onUpdatePixel={handleUpdatePixel}
-                    onPickColor={(index) => {
-                      setSelectedColorIndex(index);
-                      setToolMode(ToolMode.PENCIL);
-                    }}
                     showGrid={showGrid}
+                    toolMode={toolMode}
+                    colorIndex={activeColorIndex}
+                    brushSize={brushSize}
+                    mirror={mirror}
+                    onLive={setPixels}
+                    onCommit={commitStroke}
+                    onPick={handlePick}
                   />
                 </CanvasViewport>
               ) : (
               <PixelEasel
                 matrix={matrix}
                 scale={scale}
-                selectedColorIndex={selectedColorIndex}
-                toolMode={toolMode}
-                onUpdatePixel={handleUpdatePixel}
-                onPickColor={(index) => {
-                  setSelectedColorIndex(index);
-                  setToolMode(ToolMode.PENCIL);
-                }}
                 showGrid={showGrid}
+                toolMode={toolMode}
+                colorIndex={activeColorIndex}
+                brushSize={brushSize}
+                mirror={mirror}
+                onLive={setPixels}
+                onCommit={commitStroke}
+                onPick={handlePick}
               />
               )}
               {showJson && (
@@ -468,13 +555,12 @@ const App: React.FC = () => {
 
           {isMobile ? (
             <MobileEditorDock
-              toolMode={toolMode}
-              onToolModeChange={setToolMode}
+              {...toolbar}
               palette={matrix.palette}
-              selectedIndex={selectedColorIndex}
+              selectedIndex={activeColorIndex}
               onSelect={(index) => {
                 setSelectedColorIndex(index);
-                if (toolMode === ToolMode.ERASER) setToolMode(ToolMode.PENCIL);
+                if (toolMode === ToolMode.ERASER || toolMode === ToolMode.PICKER) setToolMode(ToolMode.PENCIL);
               }}
               onUpdateColor={handleUpdatePaletteColor}
               onAddColor={handleAddColor}
@@ -483,13 +569,14 @@ const App: React.FC = () => {
           ) : (
           <PalettePanel
             palette={matrix.palette}
-            selectedIndex={selectedColorIndex}
+            selectedIndex={activeColorIndex}
             onSelect={(index) => {
               setSelectedColorIndex(index);
-              if (toolMode === ToolMode.ERASER) setToolMode(ToolMode.PENCIL);
+              if (toolMode === ToolMode.ERASER || toolMode === ToolMode.PICKER) setToolMode(ToolMode.PENCIL);
             }}
             onUpdateColor={handleUpdatePaletteColor}
             onAddColor={handleAddColor}
+            tools={<EditorToolPanel {...toolbar} />}
           />
           )}
           <MobileEditorSheet
@@ -527,7 +614,7 @@ const App: React.FC = () => {
       <div
         role="tablist"
         aria-label="Creation steps"
-        className={`z-50 flex shrink-0 border-t-4 border-amber-900/80 bg-black md:hidden ${view === 'library' ? 'hidden' : ''}`}
+        className={`z-50 flex shrink-0 border-t-4 border-amber-900/80 bg-black md:hidden ${view !== 'studio' ? 'hidden' : ''}`}
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
         {STEPS.map((step) => {

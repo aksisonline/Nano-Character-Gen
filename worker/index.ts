@@ -1,11 +1,13 @@
 /// <reference types="@cloudflare/workers-types" />
 // PixelForge API Worker: AKS sign-in (OIDC code + PKCE), per-account quota via ACCESS, Gemini proxy.
 // The Gemini key never reaches the browser.
-import { ASPECT_RATIOS, buildAnimationPrompt, buildSpritePrompt } from '../shared/prompts'
+import { ASPECT_RATIOS, BLOCKED_MESSAGE, buildAnimationPrompt, buildSpritePrompt, chooseKeyColor } from '../shared/prompts'
 
 import type { Env } from './env'
 import { FLOW_COOKIE, SESSION_COOKIE, SESSION_TTL, b64u, cookie, enc, json, rand, readCookie, session, sign, unb64u, verify } from './session'
 import { handleCharacters } from './characters'
+import { classifyGeminiResponse, geminiUsage } from './gemini'
+import { log, snippet, userTag } from './log'
 import { getOutage, type Outage } from './flags'
 
 async function login(env: Env, request: Request) {
@@ -42,13 +44,13 @@ async function callback(env: Env, request: Request) {
       redirect_uri: `${url.origin}/api/auth/callback`,
     }),
   })
-  if (!res.ok) { console.error(JSON.stringify({ event: 'oidc_token_failed', status: res.status })); return signInFailed(request) }
+  if (!res.ok) { log('error', 'oidc_token_failed', { status: res.status }); return signInFailed(request) }
   const { access_token } = await res.json<{ access_token?: string }>()
-  if (!access_token) { console.error(JSON.stringify({ event: 'oidc_no_access_token' })); return signInFailed(request) }
+  if (!access_token) { log('error', 'oidc_no_access_token'); return signInFailed(request) }
   // Identity comes from the issuer's userinfo endpoint over the back channel, not from client-parsed tokens.
   const info = await fetch(`${env.OIDC_ISSUER}/oauth2/userinfo`, { headers: { Authorization: `Bearer ${access_token}` } })
   const claims = info.ok ? await info.json<{ sub?: string; name?: string }>() : {}
-  if (!claims.sub) { console.error(JSON.stringify({ event: 'oidc_userinfo_failed', status: info.status })); return signInFailed(request) }
+  if (!claims.sub) { log('error', 'oidc_userinfo_failed', { status: info.status }); return signInFailed(request) }
   const token = await sign(env, { sub: claims.sub, name: claims.name, exp: Math.floor(Date.now() / 1000) + SESSION_TTL })
   const headers = new Headers({ Location: '/', 'Cache-Control': 'no-store' })
   headers.append('Set-Cookie', cookie(request, SESSION_COOKIE, token, SESSION_TTL))
@@ -68,13 +70,12 @@ async function callGemini(env: Env, parts: unknown[], aspectRatio: string) {
       body: JSON.stringify({ contents: [{ parts }], generationConfig: { imageConfig: { aspectRatio } } }),
     },
   )
-  if (!res.ok) return { ok: false as const, providerFailure: true }
-  const data = await res.json<any>()
-  for (const p of data.candidates?.[0]?.content?.parts ?? []) {
-    const d = p.inlineData ?? p.inline_data
-    if (d?.data) return { ok: true as const, image: `data:${d.mimeType ?? d.mime_type};base64,${d.data}` }
+  if (!res.ok) {
+    log('error', 'gemini_http_error', { status: res.status, model: env.MODEL_NAME, body: snippet(await res.text().catch(() => ''), 300) })
+    return { ok: false as const, providerFailure: true }
   }
-  return { ok: false as const, providerFailure: false }
+  const data = await res.json<any>()
+  return { ok: true as const, result: classifyGeminiResponse(data), usage: geminiUsage(data), finishReason: data?.candidates?.[0]?.finishReason as string | undefined }
 }
 
 async function generate(env: Env, request: Request, kind: 'sprite' | 'animation') {
@@ -92,33 +93,58 @@ async function generate(env: Env, request: Request, kind: 'sprite' | 'animation'
   const str = (v: unknown, max: number) => typeof v === 'string' && v.trim().length > 0 && v.length <= max
   if (kind === 'sprite') {
     if (!str(body.prompt, MAX_PROMPT)) return json({ error: 'Invalid prompt' }, 400)
-    parts = [{ text: buildSpritePrompt(body.prompt) }]
-    aspectRatio = '3:4'
+    parts = [{ text: buildSpritePrompt(body.prompt, chooseKeyColor(body.prompt)) }]
+    aspectRatio = '2:3'
   } else {
     const { name, prompt, frameCount, columns, rows, aspectRatio: ar, image } = body
+    const key = body.key ?? 'magenta'
+    if (key !== 'magenta' && key !== 'green') return json({ error: 'Invalid request' }, 400)
     const int = (v: unknown, max: number) => typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= max
     if (!str(name, 60) || !str(prompt, MAX_PROMPT) || !int(frameCount, 16) || !int(columns, 16) || !int(rows, 16)
       || columns * rows !== frameCount || !(ASPECT_RATIOS as readonly string[]).includes(ar)
       || typeof image !== 'string' || image.length > MAX_IMAGE_B64 || !/^[A-Za-z0-9+/=]+$/.test(image)) {
       return json({ error: 'Invalid request' }, 400)
     }
-    parts = [{ text: buildAnimationPrompt({ name, prompt, frameCount, columns, rows }) }, { inlineData: { mimeType: 'image/png', data: image } }]
+    parts = [{ text: buildAnimationPrompt({ name, prompt, frameCount, columns, rows }, key) }, { inlineData: { mimeType: 'image/png', data: image } }]
     aspectRatio = ar
   }
 
   // Reserve before any inference; failure to reach the quota service fails closed.
   let r
   try { r = await env.ACCESS.reservePixelForge(user.sub, turnId, kind) }
-  catch { return json({ error: 'Usage service unavailable' }, 503) }
+  catch (err) { log('error', 'quota_service_unavailable', { kind, message: err instanceof Error ? err.message : String(err) }); return json({ error: 'Usage service unavailable' }, 503) }
   if (!r.allowed || !r.reservationId) {
+    log('info', 'quota_denied', { kind, user: await userTag(user.sub), reason: r.reason })
     return json({ error: 'quota', reason: r.reason, remaining: r.remaining, resetsAt: r.resetsAt }, 429)
   }
-  let out
-  try { out = await callGemini(env, parts, aspectRatio) } catch { out = { ok: false as const, providerFailure: true } }
-  try { await env.ACCESS.finishPixelForge(user.sub, turnId, r.reservationId, out.ok || !out.providerFailure) } catch { /* stays charged */ }
-  if (!out.ok) return json({ error: out.providerFailure ? 'Image provider failed' : 'No image generated' }, 502)
+  let out: Awaited<ReturnType<typeof callGemini>>
+  const t0 = Date.now()
+  const who = await userTag(user.sub)
+  try { out = await callGemini(env, parts, aspectRatio) }
+  catch (err) {
+    log('error', 'gemini_fetch_failed', { kind, user: who, message: err instanceof Error ? err.message : String(err) })
+    out = { ok: false as const, providerFailure: true }
+  }
+  const result = out.ok ? out.result : null
+  log(out.ok && result?.kind === 'image' ? 'info' : 'warn', 'gemini_call', {
+    kind, user: who, turnId, model: env.MODEL_NAME, aspectRatio, ms: Date.now() - t0,
+    outcome: result ? result.kind : 'provider_failure',
+    reason: result?.kind === 'blocked' ? result.reason : undefined,
+    finishReason: out.ok ? out.finishReason : undefined,
+    ...(out.ok ? out.usage : {}),
+  })
+  // Provider failures, blocked prompts and empty responses are not charged; only a delivered image is.
+  const succeeded = result?.kind === 'image'
+  try { await env.ACCESS.finishPixelForge(user.sub, turnId, r.reservationId, succeeded) } catch (err) { log('error', 'quota_finish_failed', { kind, user: who, turnId, succeeded, message: err instanceof Error ? err.message : String(err) }) }
+  if (!result) return json({ error: 'Image provider failed' }, 502)
+  if (result.kind === 'blocked') {
+    log('warn', 'gemini_blocked', { kind, user: who, reason: result.reason, prompt: snippet(body.prompt) })
+    return json({ error: 'blocked', message: BLOCKED_MESSAGE }, 422)
+  }
+  if (result.kind === 'empty') return json({ error: 'No image generated' }, 502)
+  const image = result.image
   const usage = await env.ACCESS.getPixelForgeUsage(user.sub).catch(() => null)
-  return json({ image: out.image, usage })
+  return json({ image, usage })
 }
 
 const RETRY_AFTER = '300'
@@ -140,6 +166,21 @@ async function outageResponse(env: Env, request: Request, outage: Outage, isApi:
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const t0 = Date.now()
+    const res = await handle(request, env)
+    const { pathname } = new URL(request.url)
+    if (pathname.startsWith('/api/') || res.status >= 400) {
+      log(res.status >= 500 ? 'error' : res.status >= 400 ? 'warn' : 'info', 'request', {
+        method: request.method, path: pathname, status: res.status, ms: Date.now() - t0,
+        country: (request as any).cf?.country, ray: request.headers.get('cf-ray') ?? undefined,
+      })
+    }
+    return res
+  },
+} satisfies ExportedHandler<Env>
+
+async function handle(request: Request, env: Env): Promise<Response> {
+  {
     const url = new URL(request.url)
     const { pathname } = url
     const isApi = pathname.startsWith('/api/')
@@ -149,7 +190,7 @@ export default {
     const isPage = !isApi && !isStaticFile && pathname !== '/fun' && pathname !== '/fun/'
     if (isApi || isPage) {
       const outage = await getOutage(env, request)
-      if (outage) return outageResponse(env, request, outage, isApi)
+      if (outage) { log('warn', 'outage_served', { path: pathname, isApi }); return outageResponse(env, request, outage, isApi) }
     }
     if (!isApi) return env.ASSETS.fetch(request)
     try {
@@ -169,8 +210,8 @@ export default {
       if (pathname === '/api/generate/animation' && request.method === 'POST') return await generate(env, request, 'animation')
       return json({ error: 'Not found' }, 404)
     } catch (err) {
-      console.error(JSON.stringify({ event: 'unhandled', path: pathname, message: err instanceof Error ? err.message : String(err) }))
+      log('error', 'unhandled', { path: pathname, message: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? snippet(err.stack, 500) : undefined })
       return json({ error: 'Service unavailable' }, 503)
     }
-  },
-} satisfies ExportedHandler<Env>
+  }
+}
