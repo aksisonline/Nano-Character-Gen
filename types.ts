@@ -44,6 +44,7 @@ export interface SpriteMatrix {
 export enum ToolMode {
   PENCIL = 'PENCIL',
   ERASER = 'ERASER',
+  FILL = 'FILL',
   PICKER = 'PICKER'
 }
 

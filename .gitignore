@@ -25,3 +25,6 @@ dist-ssr
 .env*
 .dev.vars
 .wrangler
+
+# Research / test generation runs (images, prompts, raw API output)
+docs/research-runs/

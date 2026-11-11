@@ -1,13 +1,10 @@
 import React from 'react';
-import { Download, Code, Eraser, Pencil, Pipette, Plus, SlidersHorizontal, X } from 'lucide-react';
-import { ToolMode } from '../types';
-import { isMagentaLikeHex } from '../services/imageProcessingService';
-import { CHECKER_SVG } from './PalettePanel';
+import { Download, Code, Plus, SlidersHorizontal, X } from 'lucide-react';
+import { CurrentColor, isPaintableColor, paintableIndices } from './PalettePanel';
+import { EditorDockTools, type EditorToolbarProps } from './EditorToolbar';
 import GeneratePanel from './GeneratePanel';
 
-interface DockProps {
-  toolMode: ToolMode;
-  onToolModeChange: (mode: ToolMode) => void;
+interface DockProps extends EditorToolbarProps {
   palette: (string | null)[];
   selectedIndex: number;
   onSelect: (index: number) => void;
@@ -16,86 +13,54 @@ interface DockProps {
   onOpenMore: () => void;
 }
 
-const TOOLS = [
-  { mode: ToolMode.PENCIL, icon: Pencil, label: 'Draw' },
-  { mode: ToolMode.ERASER, icon: Eraser, label: 'Erase' },
-  { mode: ToolMode.PICKER, icon: Pipette, label: 'Pick' },
-];
-
 /** Thumb-zone tool + palette strip shown under the canvas on phones. */
 export const MobileEditorDock: React.FC<DockProps> = ({
-  toolMode, onToolModeChange, palette, selectedIndex, onSelect, onUpdateColor, onAddColor, onOpenMore,
+  palette, selectedIndex, onSelect, onUpdateColor, onAddColor, onOpenMore, ...tools
 }) => (
   <div className="shrink-0 border-t-4 border-amber-900/80 bg-[#141414]">
-    <div className="flex gap-2 px-3 pt-3">
-      {TOOLS.map((tool) => {
-        const active = toolMode === tool.mode;
-        return (
-          <button
-            key={tool.mode}
-            type="button"
-            onClick={() => onToolModeChange(tool.mode)}
-            aria-pressed={active}
-            className={`game-button game-interactive game-focus-pixel retro flex h-12 flex-1 flex-col items-center justify-center gap-0.5 border-2 text-[10px] ${
-              active ? 'border-amber-400 bg-amber-700 text-white' : 'border-gray-700 bg-[#1a1a1a] text-gray-300'
-            }`}
-          >
-            <tool.icon size={16} />
-            {tool.label}
-          </button>
-        );
-      })}
-      <button
-        type="button"
-        onClick={onOpenMore}
-        aria-label="More: generate, download, JSON"
-        className="game-button game-interactive game-focus-pixel retro flex h-12 flex-1 flex-col items-center justify-center gap-0.5 border-2 border-gray-700 bg-[#1a1a1a] text-[10px] text-gray-300"
-      >
-        <SlidersHorizontal size={16} />
-        More
-      </button>
-    </div>
-    <div className="game-scroll flex gap-2 overflow-x-auto px-3 py-3" style={{ touchAction: 'pan-x' }} aria-label="Palette">
-      {palette.map((color, index) => {
-        const transparent = index === 0 || (color != null && isMagentaLikeHex(color));
-        const selected = selectedIndex === index;
-        return (
-          <button
-            key={index}
-            type="button"
-            onClick={() => onSelect(index)}
-            aria-label={transparent ? 'Transparent' : `Color ${index}`}
-            aria-pressed={selected}
-            className="game-button game-focus-pixel tap-auto relative size-11 shrink-0 border-2"
-            style={{ borderColor: selected ? '#fff' : '#3f3f46', boxShadow: selected ? '0 0 0 2px #f59e0b' : undefined }}
-          >
-            {transparent ? (
-              <span className="absolute inset-0 opacity-60" style={{ backgroundImage: CHECKER_SVG, backgroundSize: '8px 8px' }} />
-            ) : (
-              <>
-                <span className="absolute inset-0" style={{ backgroundColor: color ?? 'transparent' }} />
-                {selected && (
-                  <input
-                    type="color"
-                    className="absolute inset-0 size-full cursor-pointer opacity-0"
-                    value={color ?? '#000000'}
-                    onChange={(e) => onUpdateColor(index, e.target.value)}
-                    aria-label={`Edit color ${index}`}
-                  />
-                )}
-              </>
-            )}
-          </button>
-        );
-      })}
-      <button
-        type="button"
-        onClick={onAddColor}
-        aria-label="Add color"
-        className="game-button game-focus-pixel tap-auto flex size-11 shrink-0 items-center justify-center border-2 border-dashed border-gray-600 text-gray-400"
-      >
-        <Plus size={18} />
-      </button>
+    <EditorDockTools
+      {...tools}
+      more={
+        <button
+          type="button"
+          onClick={onOpenMore}
+          aria-label="More: generate, download, JSON"
+          className="game-button game-focus-pixel tap-auto flex h-11 min-w-11 flex-1 items-center justify-center border-2 border-gray-600 bg-[#1f1f1f] text-gray-200"
+        >
+          <SlidersHorizontal size={16} aria-hidden />
+        </button>
+      }
+    />
+    <div className="flex items-center gap-2 px-3 py-3">
+      {isPaintableColor(palette, selectedIndex) && (
+        <CurrentColor compact palette={palette} index={selectedIndex} onUpdateColor={onUpdateColor} />
+      )}
+      <div className="game-scroll flex min-w-0 flex-1 gap-2 overflow-x-auto p-1" style={{ touchAction: 'pan-x' }} role="group" aria-label="Palette colors">
+        {paintableIndices(palette).map((index) => {
+          const selected = selectedIndex === index;
+          return (
+            <button
+              key={index}
+              type="button"
+              onClick={() => onSelect(index)}
+              aria-label={`Color ${index}, ${palette[index]}`}
+              aria-pressed={selected}
+              className="game-button game-focus-pixel tap-auto relative size-11 shrink-0 border-2"
+              style={{ backgroundColor: palette[index]!, borderColor: selected ? '#fff' : '#3f3f46', boxShadow: selected ? '0 0 0 2px #000, 0 0 0 4px #f59e0b' : undefined }}
+            >
+              {selected && <span aria-hidden className="absolute bottom-0 right-0 size-2 bg-white" style={{ outline: '1px solid #000' }} />}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={onAddColor}
+          aria-label="Add color"
+          className="game-button game-focus-pixel tap-auto flex size-11 shrink-0 items-center justify-center border-2 border-dashed border-gray-500 text-gray-300"
+        >
+          <Plus size={18} aria-hidden />
+        </button>
+      </div>
     </div>
   </div>
 );

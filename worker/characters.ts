@@ -1,6 +1,7 @@
 import { can, roleFor, type Action } from './authz'
 import type { Env, PutResult } from './env'
 import { json, session } from './session'
+import { log } from './log'
 import { UUID, validateCharacterDoc } from '../shared/character'
 
 const MAX_BODY = 120_000 // bytes; the store enforces its own (smaller) per-item and per-user caps too
@@ -83,7 +84,7 @@ export async function handleCharacters(request: Request, env: Env): Promise<Resp
     if ('error' in v) return json({ error: 'invalid', field: v.error }, 400)
     return putResponse(await access.putPixelForgeCharacter(sub_, id, v.doc.name, JSON.stringify(v.doc), b.baseRev as number | null))
   } catch {
-    console.error(JSON.stringify({ event: 'characters_unavailable', action }))
+    log('error', 'characters_unavailable', { action })
     return json({ error: 'Storage unavailable' }, 503)
   }
 }
